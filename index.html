@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Director's Eye - AI Cinematography Observer</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+
+    <!-- Markdown Parser (Marked) for Chat Responses -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f111a;
+            color: #e2e8f0;
+        }
+        .font-cinematic {
+            font-family: 'Playfair Display', serif;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f111a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            width: 36px; height: 36px; border-radius: 50%;
+            border-left-color: #632CA6;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .code-text { font-family: 'Courier New', Courier, monospace; }
+        
+        /* Chat Bubble Styles */
+        .chat-bubble-user {
+            background: #4f46e5; color: white;
+            border-radius: 12px 12px 0 12px;
+        }
+        .chat-bubble-ai {
+            background: #334155; color: #e2e8f0;
+            border-radius: 12px 12px 12px 0;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen relative overflow-x-hidden">
+
+    <!-- API Key Modal -->
+    <div id="api-modal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 hidden backdrop-blur-sm">
+        <div class="glass-panel p-8 rounded-2xl max-w-md w-full mx-4 shadow-2xl border border-purple-500/30">
+            <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-key text-purple-400"></i> Configure Gemini API
+            </h3>
+            <p class="text-gray-400 text-sm mb-4">
+                To use Real AI Analysis, enter your Google Gemini API Key. 
+                <br><span class="text-xs text-gray-500">(Leave empty to use Simulation Mode for Demo)</span>
+            </p>
+            <input type="password" id="api-key-input" placeholder="Paste key here (starts with AIza...)" 
+                class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white mb-6 focus:outline-none focus:border-purple-500 transition-colors">
+            <div class="flex justify-end gap-3">
+                <button onclick="closeApiModal()" class="px-4 py-2 rounded-lg hover:bg-white/10 text-gray-300 text-sm transition-colors">Cancel</button>
+                <button onclick="saveApiKey()" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-bold shadow-lg shadow-purple-900/50 transition-all">
+                    Save & Continue
+                </button>
+            </div>
+            <p class="text-xs text-center mt-4 text-gray-600">
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" class="hover:text-purple-400 underline">Get a free API Key here</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="w-full glass-panel fixed top-0 z-50 px-6 py-4 flex justify-between items-center border-b border-gray-800">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-purple-600 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg shadow-purple-500/20">
+                <i class="fa-solid fa-eye text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-wide">Director's<span class="text-purple-400">Eye</span></h1>
+                <p class="text-xs text-gray-400">Powered by Vertex AI & Datadog</p>
+            </div>
+        </div>
+        <div class="hidden md:flex gap-6 text-sm font-medium text-gray-300">
+            <a href="#" class="hover:text-white transition-colors">Dashboard</a>
+            <a href="#" class="hover:text-white transition-colors">Incidents</a>
+            <button onclick="openApiModal()" class="hover:text-purple-400 transition-colors flex items-center gap-1">
+                <i class="fa-solid fa-gear"></i> Config
+            </button>
+        </div>
+        <button class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-semibold transition-all shadow-lg shadow-purple-900/50">
+            <i class="fa-solid fa-chart-line mr-2"></i> View Observability
+        </button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow pt-24 pb-48 px-4 md:px-12 max-w-7xl mx-auto w-full">
+        
+        <!-- SECTION 1: UPLOAD -->
+        <section id="upload-section" class="flex flex-col items-center justify-center min-h-[60vh] text-center transition-all duration-500">
+            <h2 class="font-cinematic text-4xl md:text-6xl mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-200 to-gray-500">
+                Perfect Your Shot with AI
+            </h2>
+            <p class="text-gray-400 text-lg max-w-2xl mb-10">
+                Upload your frame. Let Gemini Vision analyze composition, lighting, and cinematic quality. 
+                Full observability by Datadog.
+            </p>
+
+            <!-- Dropzone -->
+            <div id="dropzone" class="w-full max-w-2xl border-2 border-dashed border-gray-600 hover:border-purple-500 bg-gray-900/50 hover:bg-gray-800/80 rounded-2xl p-12 transition-all cursor-pointer group relative overflow-hidden" onclick="triggerUpload()">
+                <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="handleFileSelect(event)">
+                
+                <div class="relative z-10 flex flex-col items-center gap-4">
+                    <div class="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                        <i class="fa-solid fa-cloud-arrow-up text-3xl text-purple-400"></i>
+                    </div>
+                    <div>
+                        <p class="text-xl font-semibold text-gray-200">Click or Drag Image Here</p>
+                        <p class="text-sm text-gray-500 mt-2">Support: JPG, PNG, WEBP (Max 5MB)</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="api-status-badge" class="mt-8 px-4 py-1 rounded-full bg-gray-800 border border-gray-700 text-xs text-gray-400">
+                Current Mode: <span class="text-yellow-400 font-bold">Simulation</span> (Set API Key for Real AI)
+            </div>
+        </section>
+
+        <!-- SECTION 2: PROCESSING -->
+        <section id="processing-section" class="hidden flex-col items-center justify-center min-h-[50vh]">
+            <div class="relative">
+                <div class="w-24 h-24 border-t-4 border-purple-500 border-solid rounded-full animate-spin"></div>
+                <div class="absolute inset-0 flex items-center justify-center text-purple-400">
+                    <i class="fa-solid fa-brain text-2xl animate-pulse"></i>
+                </div>
+            </div>
+            <h3 class="mt-8 text-2xl font-semibold">Analyzing Visual Telemetry...</h3>
+            <div class="mt-4 w-64 h-2 bg-gray-800 rounded-full overflow-hidden">
+                <div id="progress-bar" class="h-full bg-purple-500 w-0 transition-all duration-3000 ease-out"></div>
+            </div>
+            <p id="loading-text" class="text-gray-400 mt-2 text-sm code-text">Initializing Vertex AI Session...</p>
+        </section>
+
+        <!-- SECTION 3: RESULT DASHBOARD -->
+        <section id="result-section" class="hidden animate-fade-in">
+            <!-- Header Result -->
+            <div class="flex flex-col md:flex-row justify-between items-end mb-8 border-b border-gray-800 pb-4">
+                <div>
+                    <h2 class="text-3xl font-bold">Analysis Report</h2>
+                    <p class="text-gray-400 text-sm mt-1">Session ID: <span class="code-text text-purple-400">#REQ-8829-VX</span></p>
+                </div>
+                <div class="flex gap-3 mt-4 md:mt-0">
+                    <span class="px-3 py-1 rounded-full bg-green-500/10 text-green-400 border border-green-500/20 text-xs font-bold flex items-center gap-1">
+                        <i class="fa-solid fa-check"></i> Analysis Complete
+                    </span>
+                    <span class="px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-bold flex items-center gap-1">
+                        <i class="fa-solid fa-paper-plane"></i> Logs Sent to Datadog
+                    </span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                <!-- Left Column: Image & Score -->
+                <div class="lg:col-span-4 space-y-6">
+                    <div class="glass-panel p-2 rounded-2xl">
+                        <img id="preview-image" src="" class="w-full h-auto rounded-xl object-cover aspect-video" alt="Analyzed Frame">
+                    </div>
+
+                    <div class="glass-panel p-6 rounded-2xl text-center relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-blue-500"></div>
+                        <h3 class="text-gray-400 uppercase tracking-widest text-xs font-bold mb-4">Cinematic Score</h3>
+                        <div class="relative flex items-center justify-center">
+                            <svg class="w-32 h-32 transform -rotate-90">
+                                <circle cx="64" cy="64" r="60" stroke="#334155" stroke-width="8" fill="transparent"/>
+                                <circle id="score-circle" cx="64" cy="64" r="60" stroke="#8b5cf6" stroke-width="8" fill="transparent" stroke-dasharray="377" stroke-dashoffset="377" class="transition-all duration-1000 ease-out"/>
+                            </svg>
+                            <span id="score-text" class="absolute text-4xl font-bold font-cinematic">0</span>
+                        </div>
+                        <p id="score-verdict" class="text-purple-300 font-medium mt-2">Calculated by Gemini Pro</p>
+                    </div>
+                </div>
+
+                <!-- Right Column: Metrics, Critique, and Chat -->
+                <div class="lg:col-span-8 space-y-6">
+                    
+                    <!-- Metrics Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="glass-panel p-4 rounded-xl">
+                            <div class="flex justify-between mb-2">
+                                <span class="text-gray-400 text-sm"><i class="fa-solid fa-lightbulb mr-2"></i>Lighting</span>
+                                <span id="lighting-val" class="text-white font-bold">0/10</span>
+                            </div>
+                            <div class="w-full bg-gray-700 h-1.5 rounded-full">
+                                <div id="lighting-bar" class="bg-yellow-500 h-1.5 rounded-full w-0 transition-all duration-1000"></div>
+                            </div>
+                        </div>
+                        <div class="glass-panel p-4 rounded-xl">
+                            <div class="flex justify-between mb-2">
+                                <span class="text-gray-400 text-sm"><i class="fa-solid fa-crop-simple mr-2"></i>Composition</span>
+                                <span id="comp-val" class="text-white font-bold">0/10</span>
+                            </div>
+                            <div class="w-full bg-gray-700 h-1.5 rounded-full">
+                                <div id="comp-bar" class="bg-blue-500 h-1.5 rounded-full w-0 transition-all duration-1000"></div>
+                            </div>
+                        </div>
+                        <div class="glass-panel p-4 rounded-xl">
+                            <div class="flex justify-between mb-2">
+                                <span class="text-gray-400 text-sm"><i class="fa-solid fa-clapperboard mr-2"></i>Mood</span>
+                                <span id="mood-val" class="text-white font-bold">0/10</span>
+                            </div>
+                            <div class="w-full bg-gray-700 h-1.5 rounded-full">
+                                <div id="mood-bar" class="bg-pink-500 h-1.5 rounded-full w-0 transition-all duration-1000"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Critique Box -->
+                    <div class="glass-panel p-6 rounded-2xl border-l-4 border-purple-500">
+                        <h3 class="text-lg font-bold mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i> AI Director's Critique
+                        </h3>
+                        <p id="ai-critique" class="text-gray-300 leading-relaxed text-sm">Waiting for analysis...</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="glass-panel p-5 rounded-2xl">
+                            <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Optimized GenAI Prompt</h4>
+                            <div class="bg-black/40 p-3 rounded-lg text-xs text-gray-300 code-text mb-2 h-20 overflow-y-auto" id="gen-prompt">...</div>
+                        </div>
+                         <div class="glass-panel p-5 rounded-2xl bg-gradient-to-br from-purple-900/20 to-transparent">
+                             <h4 class="text-xs font-bold text-gray-500 uppercase mb-3">System Health (Live)</h4>
+                             <div class="flex justify-between items-center mb-2">
+                                 <span class="text-sm text-gray-300">Vertex AI Latency</span>
+                                 <span id="latency-val" class="text-sm font-bold text-green-400">240ms</span>
+                             </div>
+                             <div class="mt-3 pt-3 border-t border-gray-700 flex items-center gap-2 text-xs text-gray-400">
+                                 <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                 Monitoring Active
+                             </div>
+                         </div>
+                    </div>
+
+                    <!-- ✨ NEW: CHAT WITH DIRECTOR FEATURE ✨ -->
+                    <div class="glass-panel rounded-2xl overflow-hidden mt-6 border border-purple-500/20">
+                        <div class="bg-gray-800/50 p-4 border-b border-gray-700 flex justify-between items-center">
+                            <h3 class="font-bold flex items-center gap-2 text-sm">
+                                <i class="fa-regular fa-comments text-purple-400"></i> Chat with Director AI
+                            </h3>
+                            <span class="text-xs text-gray-500">Context: Current Image</span>
+                        </div>
+                        <div id="chat-history" class="h-48 overflow-y-auto p-4 space-y-3 bg-black/20">
+                            <div class="flex justify-start">
+                                <div class="chat-bubble-ai px-4 py-2 text-sm max-w-[90%]">
+                                    Hello! I've analyzed your shot. Ask me anything about how to improve it! ✨
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-3 bg-gray-800/50 flex gap-2">
+                            <input type="text" id="chat-input" placeholder="Ask e.g., 'How to fix the shadows?'" 
+                                class="flex-grow bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-purple-500">
+                            <button onclick="sendChatMessage()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 rounded-lg transition-colors">
+                                <i class="fa-solid fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button onclick="resetApp()" class="w-full py-3 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-xl text-sm font-bold transition-all mt-4">
+                        Analyze Another Frame
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- TELEMETRY CONSOLE -->
+    <div id="telemetry-console" class="fixed bottom-0 left-0 w-full bg-[#0a0a0a] border-t border-purple-900/50 transform transition-transform duration-300 z-40 h-48 md:h-40">
+        <div class="flex justify-between items-center px-4 py-1 bg-[#1a1a1a] border-b border-gray-800 cursor-pointer" onclick="toggleConsole()">
+            <div class="flex items-center gap-2 text-xs font-bold text-gray-400">
+                <i class="fa-solid fa-terminal text-purple-500"></i> DATADOG LIVE TELEMETRY
+                <span class="px-1.5 rounded bg-purple-900 text-purple-200 text-[10px]">TRACING ENABLED</span>
+            </div>
+            <i class="fa-solid fa-chevron-down text-gray-500 text-xs"></i>
+        </div>
+        <div class="p-4 font-mono text-xs overflow-y-auto h-full pb-8" id="log-container">
+            <div class="text-gray-500">[SYSTEM] Initializing Director's Eye Observability Agent...</div>
+            <div class="text-green-900/50">[READY] Waiting for user events...</div>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURATION
+        let GEMINI_API_KEY = "";
+        let currentImageBase64 = ""; // Store for Chat context
+        const MODEL_NAME = "gemini-1.5-flash";
+
+        // --- API KEY HANDLING ---
+        function openApiModal() { document.getElementById('api-modal').classList.remove('hidden'); }
+        function closeApiModal() { document.getElementById('api-modal').classList.add('hidden'); }
+        
+        function saveApiKey() {
+            const input = document.getElementById('api-key-input').value.trim();
+            if (input) {
+                GEMINI_API_KEY = input;
+                const badge = document.getElementById('api-status-badge');
+                badge.innerHTML = 'Current Mode: <span class="text-green-400 font-bold">Real AI (Gemini Flash)</span>';
+                addLog('INFO', 'API Key configured. Switching to Real Vision Mode.');
+            }
+            closeApiModal();
+        }
+
+        // --- LOGGING SYSTEM ---
+        const logContainer = document.getElementById('log-container');
+        function addLog(type, message) {
+            const div = document.createElement('div');
+            const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
+            let color = 'text-gray-300';
+            if(type === 'INFO') color = 'text-blue-400';
+            if(type === 'METRIC') color = 'text-purple-400';
+            if(type === 'WARN') color = 'text-yellow-400';
+            if(type === 'VERTEX') color = 'text-green-400';
+            div.className = `mb-1 ${color}`;
+            div.innerHTML = `<span class="text-gray-600">[${timestamp}]</span> <span class="font-bold">[${type}]</span> ${message}`;
+            logContainer.appendChild(div);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function triggerUpload() { document.getElementById('fileInput').click(); }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('preview-image').src = e.target.result;
+                    // Clean Base64 for API usage (remove data:image/jpeg;base64, prefix)
+                    currentImageBase64 = e.target.result.split(',')[1];
+                    const mimeType = e.target.result.split(';')[0].split(':')[1];
+                    startAnalysis(file.name, currentImageBase64, mimeType);
+                }
+                reader.readAsDataURL(file);
+            }
+        }
+
+        async function startAnalysis(filename, base64Data, mimeType) {
+            // UI Transition
+            document.getElementById('upload-section').classList.add('hidden');
+            document.getElementById('processing-section').classList.remove('hidden');
+            document.getElementById('processing-section').classList.add('flex');
+            
+            addLog('INFO', `File uploaded: ${filename}`);
+            addLog('DATADOG', `Starting trace id: ${Math.floor(Math.random() * 1000000000)}`);
+            
+            const progressBar = document.getElementById('progress-bar');
+            const loadingText = document.getElementById('loading-text');
+
+            // Fake Progress Steps
+            progressBar.style.width = '20%';
+            
+            if (!GEMINI_API_KEY) {
+                // --- SIMULATION MODE ---
+                loadingText.innerText = "Simulation Mode: Generating Mock Data...";
+                addLog('WARN', 'No API Key. Running simulation.');
+                
+                setTimeout(() => { progressBar.style.width = '60%'; }, 1000);
+                setTimeout(() => {
+                    const mockResult = generateMockData();
+                    renderResults(mockResult, 1200);
+                }, 2500);
+            } else {
+                // --- REAL AI MODE ---
+                loadingText.innerText = "Sending to Gemini 1.5 Flash...";
+                addLog('VERTEX', `POST /v1beta/models/${MODEL_NAME}:generateContent`);
+                progressBar.style.width = '50%';
+
+                const startTime = Date.now();
+
+                try {
+                    const result = await callGeminiVision(base64Data, mimeType);
+                    const latency = Date.now() - startTime;
+                    progressBar.style.width = '100%';
+                    renderResults(result, latency);
+                } catch (error) {
+                    console.error(error);
+                    addLog('WARN', 'API Error. Fallback to simulation.');
+                    alert("API Error: " + error.message + ". Switching to mock data.");
+                    const mockResult = generateMockData();
+                    renderResults(mockResult, 0);
+                }
+            }
+        }
+
+        async function callGeminiVision(base64Data, mimeType) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+            
+            const promptText = `Analyze this image as a professional cinematic director. 
+            Return a JSON object (NO Markdown, NO backticks) with these exact keys:
+            {
+                "score": (integer 0-100),
+                "lighting": (integer 0-10),
+                "composition": (integer 0-10),
+                "mood": (integer 0-10),
+                "critique": (string, max 40 words, constructive feedback),
+                "prompt": (string, stable diffusion style prompt description)
+            }`;
+
+            const payload = {
+                contents: [{
+                    parts: [
+                        { text: promptText },
+                        { inline_data: { mime_type: mimeType, data: base64Data } }
+                    ]
+                }]
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error(`Gemini API Error: ${response.status}`);
+            
+            const data = await response.json();
+            const textResponse = data.candidates[0].content.parts[0].text;
+            
+            // Clean markdown if present (```json ... ```)
+            const jsonStr = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+            return JSON.parse(jsonStr);
+        }
+
+        function generateMockData() {
+            return {
+                score: Math.floor(Math.random() * (98 - 70) + 70),
+                lighting: Math.floor(Math.random() * (10 - 6) + 6),
+                composition: Math.floor(Math.random() * (10 - 7) + 7),
+                mood: Math.floor(Math.random() * (10 - 5) + 5),
+                critique: "The image demonstrates strong leading lines drawing the eye to the center subject. However, the exposure is slightly underexposed in the shadows.",
+                prompt: "Cinematic shot, hyper-realistic, 8k, rule of thirds, dramatic lighting, teal and orange color grading, underexposed shadows."
+            };
+        }
+
+        function renderResults(data, latency) {
+            document.getElementById('processing-section').classList.add('hidden');
+            document.getElementById('processing-section').classList.remove('flex');
+            document.getElementById('result-section').classList.remove('hidden');
+
+            // Update UI
+            animateValue("score-text", 0, data.score, 1000);
+            updateCircle(data.score);
+            
+            updateBar('lighting', data.lighting);
+            updateBar('comp', data.composition);
+            updateBar('mood', data.mood);
+            
+            document.getElementById('ai-critique').innerText = data.critique;
+            document.getElementById('gen-prompt').innerText = data.prompt;
+            document.getElementById('latency-val').innerText = latency + "ms";
+
+            addLog('VERTEX', `Response received. Latency: ${latency}ms`);
+            addLog('METRIC', `app.cinematography.score: ${data.score}`);
+            
+            if(data.score < 60) {
+                addLog('WARN', 'Low quality score detected. Triggering Datadog Alert...');
+            }
+        }
+
+        function updateBar(idPrefix, val) {
+            document.getElementById(`${idPrefix}-val`).innerText = val + "/10";
+            document.getElementById(`${idPrefix}-bar`).style.width = (val * 10) + "%";
+        }
+
+        function updateCircle(score) {
+            const circle = document.getElementById('score-circle');
+            const circumference = 2 * Math.PI * 60; 
+            const offset = circumference - (score / 100) * circumference;
+            setTimeout(() => { circle.style.strokeDashoffset = offset; }, 100);
+        }
+
+        function animateValue(id, start, end, duration) {
+            const obj = document.getElementById(id);
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                obj.innerHTML = Math.floor(progress * (end - start) + start);
+                if (progress < 1) window.requestAnimationFrame(step);
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        // --- CHAT FEATURE ---
+        async function sendChatMessage() {
+            const inputField = document.getElementById('chat-input');
+            const text = inputField.value.trim();
+            if (!text) return;
+
+            // Add User Message
+            const history = document.getElementById('chat-history');
+            history.innerHTML += `
+                <div class="flex justify-end animate-fade-in">
+                    <div class="chat-bubble-user px-4 py-2 text-sm max-w-[90%]">${text}</div>
+                </div>`;
+            inputField.value = '';
+            history.scrollTop = history.scrollHeight;
+
+            if (!GEMINI_API_KEY) {
+                // Mock Response
+                setTimeout(() => {
+                    addBotMessage("Since we are in simulation mode, I can't really see the image details to answer that specific question. Try adding an API key!");
+                }, 1000);
+                return;
+            }
+
+            // Real Gemini Chat Call
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: "Context: The user is asking about the image you just analyzed. Answer as a helpful director." },
+                            { text: "User Question: " + text },
+                            { inline_data: { mime_type: "image/jpeg", data: currentImageBase64 } } // Re-send image for context
+                        ]
+                    }]
+                };
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                const reply = data.candidates[0].content.parts[0].text;
+                addBotMessage(marked.parse(reply)); // Render Markdown
+
+            } catch (e) {
+                addBotMessage("Sorry, I encountered an error talking to Gemini.");
+            }
+        }
+
+        function addBotMessage(htmlContent) {
+            const history = document.getElementById('chat-history');
+            history.innerHTML += `
+                <div class="flex justify-start animate-fade-in">
+                    <div class="chat-bubble-ai px-4 py-2 text-sm max-w-[90%] prose prose-invert prose-sm">
+                        ${htmlContent}
+                    </div>
+                </div>`;
+            history.scrollTop = history.scrollHeight;
+        }
+
+        function resetApp() {
+            document.getElementById('result-section').classList.add('hidden');
+            document.getElementById('upload-section').classList.remove('hidden');
+            document.getElementById('progress-bar').style.width = '0';
+            document.getElementById('score-circle').style.strokeDashoffset = 377;
+            // Clear Chat
+            document.getElementById('chat-history').innerHTML = `
+                <div class="flex justify-start"><div class="chat-bubble-ai px-4 py-2 text-sm">Hello! I've analyzed your shot. Ask me anything! ✨</div></div>`;
+            addLog('INFO', '--- Session Reset ---');
+        }
+
+        function toggleConsole() {
+            const c = document.getElementById('telemetry-console');
+            c.classList.toggle('translate-y-[80%]');
+        }
+    </script>
+</body>
+</html>
