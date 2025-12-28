@@ -30,16 +30,24 @@ const simulateTraffic = async () => {
             await axios.post(`${API_URL}/simulate-error`);
         } else {
             console.log('🟢 Simulating Normal Analysis...');
-            // Upload dummy image (using demo mode to avoid burning API quota if any)
+            // Upload dummy image
             const form = new FormData();
             form.append('image', createDummyImage(), { filename: 'test-image.jpg', contentType: 'image/jpeg' });
             form.append('demoMode', 'true');
 
             await axios.post(`${API_URL}/analyze`, form, {
-                headers: {
-                    ...form.getHeaders()
-                }
+                headers: { ...form.getHeaders() }
             });
+
+            // 30% Chance to also trigger "Magic Edit"
+            if (Math.random() < 0.3) {
+                console.log('✨ Simulating Magic Edit...');
+                const dummyImageBase64 = createDummyImage().toString('base64');
+                await axios.post(`${API_URL}/edit-image`, {
+                    image: `data:image/jpeg;base64,${dummyImageBase64}`,
+                    prompt: "Make it more cinematic"
+                });
+            }
         }
     } catch (error) {
         // Expected errors are fine
@@ -47,6 +55,7 @@ const simulateTraffic = async () => {
             console.log(`   Response: ${error.response.status} ${error.response.statusText}`);
         } else {
             console.log(`   Error: ${error.message}`);
+            if (error.code) console.log(`   Code: ${error.code}`);
         }
     }
 };

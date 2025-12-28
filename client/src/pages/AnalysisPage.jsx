@@ -23,8 +23,46 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
 
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
+  
+  // Edit State
+  const [isEditing, setIsEditing] = useState(false)
+  const [editPrompt, setEditPrompt] = useState('')
+  const [isGeneratingEdit, setIsGeneratingEdit] = useState(false)
+  const [editedImage, setEditedImage] = useState(null)
+  const [editCount, setEditCount] = useState(0)
+  const [magicHistory, setMagicHistory] = useState([])
+  const MAX_EDITS = 3
+
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
+
+  const handleMagicEdit = async () => {
+    if (!editPrompt.trim() || editCount >= MAX_EDITS) return
+    
+    const newHistoryItem = { role: 'user', text: editPrompt, timestamp: Date.now() }
+    setMagicHistory(prev => [...prev, newHistoryItem])
+    
+    setIsGeneratingEdit(true)
+    try {
+      const response = await axios.post('/api/edit-image', {
+        image: image,
+        prompt: editPrompt
+      })
+      if (response.data.editedImage) {
+        setEditedImage(response.data.editedImage)
+        setEditCount(prev => prev + 1)
+        // Add success message to history
+        setMagicHistory(prev => [...prev, { role: 'ai', text: "Image generated successfully.", image: response.data.editedImage }])
+      } else {
+        setMagicHistory(prev => [...prev, { role: 'ai', text: response.data.reply }])
+      }
+    } catch (e) {
+      setMagicHistory(prev => [...prev, { role: 'ai', text: "Edit failed. Please try again." }])
+    } finally {
+      setIsGeneratingEdit(false)
+      setEditPrompt('') // Clear input
+    }
+  }
 
   useEffect(() => {
     if (!result || !image) {
@@ -132,22 +170,32 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
             transition={{ delay: 0.2 }}
             className="rounded-2xl bg-white/5 border border-white/10 p-6 backdrop-blur-xl"
           >
-             <div className="flex justify-between items-center mb-4">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                 <div className="flex items-center gap-2 text-indigo-300">
                    <Sparkles className="w-4 h-4" />
                    <span className="text-sm font-semibold uppercase tracking-wider">Generated Prompt</span>
                 </div>
-                <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(result.prompt);
-                    setCopiedPrompt(true);
-                    setTimeout(() => setCopiedPrompt(false), 2000);
-                  }}
-                  className="text-xs flex items-center gap-2 text-zinc-400 hover:text-white transition-colors"
-                >
-                  {copiedPrompt ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                  {copiedPrompt ? "COPIED" : "COPY PROMPT"}
-                </button>
+                
+                <div className="flex items-center gap-3 self-end md:self-auto">
+                   <button 
+                     onClick={() => setIsEditing(true)}
+                     className="text-xs flex items-center gap-2 text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20 px-4 py-2 rounded-full font-medium"
+                   >
+                     <Sparkles className="w-3 h-3" />
+                     MAGIC EDIT
+                   </button>
+                   <button 
+                     onClick={() => {
+                       navigator.clipboard.writeText(result.prompt);
+                       setCopiedPrompt(true);
+                       setTimeout(() => setCopiedPrompt(false), 2000);
+                     }}
+                     className="text-xs flex items-center gap-2 text-zinc-400 hover:text-white transition-colors border border-white/10 px-3 py-2 rounded-full hover:bg-white/5"
+                   >
+                     {copiedPrompt ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                     {copiedPrompt ? "COPIED" : "COPY"}
+                   </button>
+                </div>
              </div>
              <p className="font-mono text-sm text-zinc-300 leading-relaxed opacity-80 select-all">
                 {result.prompt}
@@ -323,6 +371,192 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                 </div>
                 <div className="bg-white/5 p-4 flex justify-center border-t border-white/5">
                    <button onClick={() => setIsSharing(false)} className="text-sm text-zinc-400 hover:text-white">Maybe Later</button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+        {isEditing && (
+          <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/90 backdrop-blur-md md:p-4">
+             <motion.div 
+               initial={{ opacity: 0, y: 100 }}
+               animate={{ opacity: 1, y: 0 }}
+               exit={{ opacity: 0, y: 100 }}
+               className="w-full max-w-5xl bg-zinc-900 md:border border-white/10 rounded-t-3xl md:rounded-3xl overflow-hidden flex flex-col h-[90vh] md:h-[85vh] shadow-2xl"
+             >
+                {/* Modal Header */}
+                <div className="p-4 md:p-6 border-b border-white/10 flex justify-between items-center bg-zinc-900 shrink-0">
+                   <div className="flex flex-col">
+                      <h3 className="text-xl font-bold font-display flex items-center gap-2 text-white">
+                        <Sparkles className="w-5 h-5 text-indigo-400" />
+                        Magic Director's Edit
+                      </h3>
+                      <p className="text-xs text-zinc-400 hidden md:block">AI-powered image remixing and color grading</p>
+                   </div>
+                   <button 
+                     onClick={() => { setIsEditing(false); setEditedImage(null); }} 
+                     className="p-2 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                   >
+                     <span className="sr-only">Close</span>
+                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                   </button>
+                </div>
+                
+                {/* Main Content Area */}
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-black/50 custom-scrollbar">
+                   {editedImage ? (
+                     <div className="flex flex-col md:grid md:grid-cols-2 gap-6 h-full">
+                        <div className="space-y-3 flex flex-col">
+                           <span className="text-xs font-mono text-zinc-500 uppercase tracking-wider flex items-center gap-2">
+                             <div className="w-2 h-2 rounded-full bg-zinc-600" />
+                             Original Shot
+                           </span>
+                           <div className="relative rounded-2xl overflow-hidden border border-white/10 flex-1 bg-zinc-900/50 min-h-[200px]">
+                              <img src={image} className="w-full h-full object-contain absolute inset-0" alt="Original" />
+                           </div>
+                        </div>
+                        <div className="space-y-3 flex flex-col">
+                           <span className="text-xs font-mono text-indigo-400 uppercase tracking-wider flex items-center gap-2">
+                             <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                             AI Remixed
+                           </span>
+                           <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 flex-1 bg-indigo-900/10 min-h-[200px] shadow-[0_0_30px_rgba(99,102,241,0.1)]">
+                              <img src={editedImage} className="w-full h-full object-contain absolute inset-0" alt="Edited" />
+                              <a href={editedImage} download="magic-edit.jpg" className="absolute bottom-4 right-4 p-2 bg-black/60 hover:bg-black/80 backdrop-blur text-white rounded-lg border border-white/20 transition-all opacity-0 group-hover:opacity-100">
+                                <Maximize2 className="w-4 h-4" />
+                              </a>
+                           </div>
+                           <div className="md:hidden text-center text-xs text-zinc-500 italic mt-2">
+                             (Tap image to save)
+                           </div>
+                        </div>
+                     </div>
+                   ) : (
+                     <div className="flex flex-col h-full">
+                        {/* Top Context Bar: Small ID Image + Suggestions */}
+                        <div className="flex items-center gap-4 mb-6 p-4 bg-white/5 rounded-2xl border border-white/10 shrink-0 overflow-x-auto">
+                            {/* Small Original Image Context */}
+                            <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-white/20 shrink-0 group">
+                                <img src={image} className="w-full h-full object-cover" alt="Context" />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white font-mono text-center leading-tight p-1">
+                                    Original Source
+                                </div>
+                            </div>
+
+                            {/* Horizontal Suggestions */}
+                            <div className="flex gap-2">
+                                {["Cyberpunk Neon", "Golden Hour", "B&W Film Noir", "Ghibli Style", "Moody Fog", "80s Retro"].map((suggestion) => (
+                                    <button 
+                                      key={suggestion}
+                                      onClick={() => setEditPrompt(suggestion)}
+                                      className="whitespace-nowrap px-4 py-2 rounded-full bg-black/40 hover:bg-indigo-600/20 border border-white/10 hover:border-indigo-500/50 text-xs text-zinc-300 hover:text-white transition-all"
+                                    >
+                                      {suggestion}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Chat History Area */}
+                        <div className="flex-1 overflow-y-auto space-y-4 px-2">
+                           {magicHistory.length === 0 ? (
+                               <div className="flex flex-col items-center justify-center h-full text-center opacity-50 space-y-4">
+                                   <Sparkles className="w-12 h-12 text-zinc-600" />
+                                   <p className="text-zinc-400 text-sm max-w-xs">
+                                     Select a suggestion above or describe your vision below. <br/>
+                                     <span className="text-xs text-zinc-600">(Max {MAX_EDITS} edits per photo)</span>
+                                   </p>
+                               </div>
+                           ) : (
+                               magicHistory.map((msg, i) => (
+                                   <div key={i} className={cn("flex w-full", msg.role === 'user' ? "justify-end" : "justify-start")}>
+                                       <div className={cn(
+                                           "max-w-[80%] rounded-2xl p-4 text-sm",
+                                           msg.role === 'user' 
+                                            ? "bg-indigo-600 text-white rounded-br-none" 
+                                            : "bg-zinc-800 text-zinc-200 rounded-bl-none border border-white/10"
+                                       )}>
+                                           {msg.text}
+                                           {msg.image && (
+                                               <div className="mt-3 rounded-lg overflow-hidden border border-white/10">
+                                                   <img src={msg.image} className="w-full h-auto" alt="History Result" />
+                                               </div>
+                                           )}
+                                       </div>
+                                   </div>
+                               ))
+                           )}
+                           {/* Loading Indicator in Chat */}
+                           {isGeneratingEdit && (
+                               <div className="flex justify-start w-full">
+                                   <div className="bg-zinc-800 rounded-2xl rounded-bl-none p-4 border border-white/10 flex items-center gap-2">
+                                       <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                       <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                       <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                   </div>
+                               </div>
+                           )}
+                           <div ref={messagesEndRef} />
+                        </div>
+                     </div>
+                   )}
+                </div>
+
+                {/* Input Footer - Sticky */}
+                <div className="p-4 md:p-6 bg-zinc-900 border-t border-white/10 shrink-0 mb-safe-area">
+                   {!editedImage ? (
+                     <div className="flex gap-3">
+                        {editCount >= MAX_EDITS ? (
+                            <div className="flex-1 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-4 text-red-200 text-center text-sm font-medium flex items-center justify-center gap-2">
+                                <Info className="w-4 h-4" />
+                                Edit limit reached ({MAX_EDITS}/{MAX_EDITS}). Upload a new photo to continue.
+                            </div>
+                        ) : (
+                            <>
+                                <input 
+                                  type="text" 
+                                  value={editPrompt}
+                                  onChange={e => setEditPrompt(e.target.value)}
+                                  placeholder={isGeneratingEdit ? "AI is thinking..." : `Describe your edit (Attempt ${editCount + 1}/${MAX_EDITS})...`}
+                                  className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-white focus:outline-none focus:border-indigo-500 transition-all font-mono text-sm placeholder:text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={isGeneratingEdit}
+                                  onKeyDown={e => e.key === 'Enter' && handleMagicEdit()}
+                                  autoFocus
+                                />
+                                <button 
+                                  onClick={handleMagicEdit}
+                                  disabled={isGeneratingEdit || !editPrompt.trim()}
+                                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-6 md:px-8 rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-600/20 whitespace-nowrap"
+                                >
+                                   {isGeneratingEdit ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                                   <span className="hidden md:inline">{isGeneratingEdit ? 'Remixing...' : 'Generate'}</span>
+                                   <span className="md:hidden">{isGeneratingEdit ? '...' : 'Go'}</span>
+                                </button>
+                            </>
+                        )}
+                     </div>
+                   ) : (
+                     <div className="flex gap-3 justify-end">
+                        <button 
+                           onClick={() => setEditedImage(null)}
+                           className="px-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-white font-medium transition-colors"
+                        >
+                          Try Another Edit
+                        </button>
+                        <button 
+                           onClick={() => {
+                             // Create dummy link to save
+                             const link = document.createElement('a');
+                             link.href = editedImage;
+                             link.download = `directors-eye-remix-${Date.now()}.jpg`;
+                             link.click();
+                           }}
+                           className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/20 flex items-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                          Save Image
+                        </button>
+                     </div>
+                   )}
                 </div>
              </motion.div>
           </div>

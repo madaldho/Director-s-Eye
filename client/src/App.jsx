@@ -7,8 +7,16 @@ import HomePage from './pages/HomePage'
 import AnalysisPage from './pages/AnalysisPage'
 
 function App() {
-  const [analysisResult, setAnalysisResult] = useState(null)
-  const [uploadedImage, setUploadedImage] = useState(null)
+  // Initialize from LocalStorage to persist state updates/refresh
+  const [analysisResult, setAnalysisResult] = useState(() => {
+    const saved = localStorage.getItem('lastAnalysis');
+    return saved ? JSON.parse(saved) : null;
+  });
+  
+  const [uploadedImage, setUploadedImage] = useState(() => {
+    return localStorage.getItem('lastImage') || null;
+  });
+
   const [telemetryLogs, setTelemetryLogs] = useState([])
 
   const addTelemetryLog = (log) => {
@@ -20,6 +28,10 @@ function App() {
   const handleAnalysisComplete = (result, imageData) => {
     setAnalysisResult(result)
     setUploadedImage(imageData)
+    
+    // Save to LocalStorage
+    localStorage.setItem('lastAnalysis', JSON.stringify(result));
+    localStorage.setItem('lastImage', imageData);
     
     // Track RUM action
     datadogRum.addAction('image_analyzed', {

@@ -15,10 +15,10 @@ async function listModels() {
   
   const candidates = [
       'gemini-3.0-flash',        // What user wants
-      'gemini-2.0-flash',        // What I used
+      'gemini-2.5-flash-lite',        // What I used
       'gemini-2.0-flash-exp',    // Experimental
-      'gemini-1.5-flash',        // Stable
-      'gemini-1.5-pro'
+      'gemini-2.5-flash',        // Stable
+      'gemini-3-pro'
   ];
 
   for (const modelName of candidates) {
