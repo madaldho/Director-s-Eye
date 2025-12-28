@@ -1,38 +1,24 @@
-import React, { useEffect, useRef } from 'react'
-import { Terminal, Minimize2, Maximize2 } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Terminal, Minimize2, Maximize2, Circle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { cn } from '../lib/utils'
 
 const TelemetryConsole = ({ logs }) => {
-  const [isMinimized, setIsMinimized] = React.useState(false)
+  const [isMinimized, setIsMinimized] = useState(false)
   const logsEndRef = useRef(null)
 
-  const scrollToBottom = () => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
   useEffect(() => {
-    scrollToBottom()
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
-  const getLogColor = (type) => {
+  const getLogStyles = (type) => {
     switch (type) {
-      case 'error': return 'text-red-400'
-      case 'warning': return 'text-yellow-400'
-      case 'success': return 'text-green-400'
-      case 'metric': return 'text-blue-400'
-      case 'trace': return 'text-purple-400'
-      default: return 'text-gray-300'
-    }
-  }
-
-  const getLogPrefix = (type) => {
-    switch (type) {
-      case 'error': return '[ERROR]'
-      case 'warning': return '[WARN]'
-      case 'success': return '[INFO]'
-      case 'metric': return '[METRIC]'
-      case 'trace': return '[TRACE]'
-      default: return '[LOG]'
+      case 'error': return { color: 'text-red-400', bg: 'bg-red-500/10', prefix: 'ERR' }
+      case 'warning': return { color: 'text-amber-400', bg: 'bg-amber-500/10', prefix: 'WRN' }
+      case 'success': return { color: 'text-emerald-400', bg: 'bg-emerald-500/10', prefix: 'OK' }
+      case 'metric': return { color: 'text-indigo-400', bg: 'bg-indigo-500/10', prefix: 'MTR' }
+      case 'trace': return { color: 'text-purple-400', bg: 'bg-purple-500/10', prefix: 'TRC' }
+      default: return { color: 'text-zinc-400', bg: 'bg-zinc-500/10', prefix: 'LOG' }
     }
   }
 
@@ -40,27 +26,30 @@ const TelemetryConsole = ({ logs }) => {
     <motion.div
       initial={{ y: 100 }}
       animate={{ y: 0 }}
-      className="fixed bottom-0 left-0 right-0 z-50"
+      className="fixed bottom-0 left-0 right-0 z-40"
     >
-      <div className="bg-dark-900/95 backdrop-blur-md border-t border-white/10">
+      <div className="bg-black/90 backdrop-blur-xl border-t border-white/10 shadow-2xl shadow-black">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
-          <div className="flex items-center space-x-2">
-            <Terminal className="w-4 h-4 text-green-400" />
-            <span className="text-sm font-medium text-green-400">
-              Datadog Telemetry Console
-            </span>
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-medium text-white tracking-wide">Datadog Telemetry</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Circle className="w-2 h-2 fill-emerald-400 text-emerald-400 animate-pulse" />
+              <span className="text-xs text-zinc-500 font-mono">LIVE</span>
+            </div>
           </div>
           
           <button
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-white/10 rounded transition-colors"
+            className="p-1.5 hover:bg-white/10 rounded-md transition-colors"
           >
             {isMinimized ? (
-              <Maximize2 className="w-4 h-4" />
+              <Maximize2 className="w-4 h-4 text-zinc-400" />
             ) : (
-              <Minimize2 className="w-4 h-4" />
+              <Minimize2 className="w-4 h-4 text-zinc-400" />
             )}
           </button>
         </div>
@@ -74,28 +63,39 @@ const TelemetryConsole = ({ logs }) => {
               exit={{ height: 0 }}
               className="overflow-hidden"
             >
-              <div className="h-32 overflow-y-auto p-4 terminal-text text-xs">
+              <div className="h-32 overflow-y-auto p-3 font-mono text-xs custom-scrollbar bg-black/50">
                 {logs.length === 0 ? (
-                  <div className="text-gray-500 italic">
+                  <div className="h-full flex items-center justify-center text-zinc-600 italic">
                     Waiting for telemetry data...
                   </div>
                 ) : (
-                  logs.map((log) => (
-                    <motion.div
-                      key={log.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className={`mb-1 ${getLogColor(log.type)}`}
-                    >
-                      <span className="text-gray-500">[{log.timestamp}]</span>
-                      <span className="ml-2 font-semibold">
-                        {getLogPrefix(log.type)}
-                      </span>
-                      <span className="ml-2">{log.message}</span>
-                    </motion.div>
-                  ))
+                  <div className="space-y-1">
+                    {logs.map((log) => {
+                      const styles = getLogStyles(log.type)
+                      return (
+                        <motion.div
+                          key={log.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="flex items-start gap-3 hover:bg-white/5 p-0.5 rounded px-2 transition-colors"
+                        >
+                          <span className="text-zinc-600 shrink-0 select-none min-w-[60px]">{log.timestamp}</span>
+                          <span className={cn(
+                            'px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold shrink-0 min-w-[35px] text-center tracking-wider',
+                            styles.bg,
+                            styles.color
+                          )}>
+                            {styles.prefix}
+                          </span>
+                          <span className={cn('break-all font-light tracking-wide', styles.color)}>
+                            {log.message}
+                          </span>
+                        </motion.div>
+                      )
+                    })}
+                    <div ref={logsEndRef} />
+                  </div>
                 )}
-                <div ref={logsEndRef} />
               </div>
             </motion.div>
           )}

@@ -8,7 +8,7 @@ import './index.css'
 datadogRum.init({
   applicationId: import.meta.env.VITE_DD_APPLICATION_ID || 'dummy-app-id',
   clientToken: import.meta.env.VITE_DD_CLIENT_TOKEN || 'dummy-client-token',
-  site: 'datadoghq.com',
+  site: 'us5.datadoghq.com',
   service: 'directors-eye-frontend',
   env: 'production',
   version: '1.0.0',
