@@ -5,13 +5,15 @@
 @tailwind utilities;
 
 :root {
-  /* Sci-Fi / Futuristic Palette */
-  --space-black: #030014;
-  --deep-void: #09090b;
-  --nebula-purple: #7000ff;
-  --cyber-cyan: #00f3ff;
-  --plasma-pink: #ff0080;
-  --matrix-green: #00ff9d;
+  /* Bento Cine-Grid Palette */
+  --bento-bg: #09090b;       /* Zinc 950 */
+  --bento-card: #18181b;     /* Zinc 900 */
+  --bento-border: #27272a;   /* Zinc 800 */
+  --bento-text: #e4e4e7;     /* Zinc 200 */
+  --bento-muted: #a1a1aa;    /* Zinc 400 */
+  --bento-accent: #6366f1;   /* Indigo 500 */
+  --bento-accent-dim: #4338ca; /* Indigo 700 */
+  --bento-success: #10b981;  /* Emerald 500 */
   
   --font-display: 'Outfit', sans-serif;
   --font-mono: 'Space Mono', monospace;
@@ -19,14 +21,12 @@
 
 @layer base {
   body {
-    @apply bg-[var(--space-black)] text-white font-sans antialiased selection:bg-[var(--cyber-cyan)] selection:text-black;
-    background-image: 
-      radial-gradient(circle at 50% 0%, rgba(112, 0, 255, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 0% 50%, rgba(0, 243, 255, 0.1) 0%, transparent 50%);
-    background-attachment: fixed;
+    @apply bg-[var(--bento-bg)] text-[var(--bento-text)] font-sans antialiased selection:bg-[var(--bento-accent)] selection:text-white;
+    /* Subtle Grain Texture */
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
   }
 
-  /* Custom Scrollbar */
+  /* Refined Scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -35,57 +35,38 @@
     @apply bg-transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-white/10 rounded-full hover:bg-[var(--cyber-cyan)] transition-colors;
+    @apply bg-[var(--bento-border)] rounded-full hover:bg-[var(--bento-muted)] transition-colors;
   }
 }
 
 @layer utilities {
-  .text-gradient-cyan {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-[var(--cyber-cyan)] to-[var(--nebula-purple)];
+  .bento-card {
+    @apply bg-[var(--bento-card)] border border-[var(--bento-border)] rounded-2xl p-6 transition-all duration-300;
   }
   
-  .border-gradient-cyan {
-    border-image: linear-gradient(to right, var(--cyber-cyan), var(--nebula-purple)) 1;
+  .bento-card:hover {
+    @apply shadow-lg;
+    border-color: rgba(99, 102, 241, 0.3); /* Indigo 500 @ 30% */
+    box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.1), 0 4px 6px -2px rgba(99, 102, 241, 0.05);
   }
 
-  .glass-panel {
-    @apply bg-white/[0.03] backdrop-blur-xl border border-white/10;
+  .bento-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
   }
-  
-  .glass-hud {
-    @apply bg-black/40 backdrop-blur-3xl border border-[var(--cyber-cyan)]/30 shadow-[0_0_15px_rgba(0,243,255,0.1)];
+
+  .text-highlight {
+    @apply text-[var(--bento-accent)] font-medium;
   }
-  
-  .animate-float {
-    animation: float 6s ease-in-out infinite;
-  }
-  
-  .animate-pulse-glow {
-    animation: pulse-glow 3s ease-in-out infinite;
-  }
-  
-  .animate-scanline {
-    animation: scanline 8s linear infinite;
+
+  /* Minimalist Animation */
+  .fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
   }
 }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { 
-    opacity: 1; 
-    filter: drop-shadow(0 0 5px var(--cyber-cyan));
-  }
-  50% { 
-    opacity: 0.7;
-    filter: drop-shadow(0 0 15px var(--cyber-cyan));
-  }
-}
-
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }

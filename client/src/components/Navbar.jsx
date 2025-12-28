@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Activity, RotateCcw, Monitor, Settings, Zap } from 'lucide-react'
+import { Activity, RotateCcw, Monitor, Settings, Zap, Menu } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '../lib/utils'
 import axios from 'axios'
@@ -28,136 +28,106 @@ const Navbar = () => {
     datadogRum.addAction('simulate_error_click', { component: 'navbar' })
     try {
       await axios.post('/api/simulate-error')
-    } catch (err) {
-      // Ignore
-    }
+    } catch (err) { }
   }
 
   return (
     <>
       <motion.nav
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ type: 'spring', stiffness: 100, damping: 20 }}
-        className="fixed top-6 left-0 right-0 z-50 flex justify-center pointer-events-none"
+        initial={{ y: -50, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="fixed top-6 inset-x-0 z-50 flex justify-center px-6 pointer-events-none"
       >
-        <div className="glass-hud rounded-full px-6 py-3 flex items-center gap-8 pointer-events-auto">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="absolute inset-0 bg-[var(--cyber-cyan)] blur-md opacity-50 animate-pulse" />
-              <Monitor className="w-5 h-5 text-[var(--cyber-cyan)] relative z-10" />
-            </div>
-            <span className="font-mono font-bold tracking-wider text-sm">
-              DIRECTOR_<span className="text-[var(--cyber-cyan)]">EYE</span>
+        <div className="bg-[var(--bento-card)]/80 backdrop-blur-md border border-[var(--bento-border)] rounded-full px-5 py-2.5 flex items-center gap-6 shadow-xl shadow-black/20 pointer-events-auto">
+          {/* Brand */}
+          <div className="flex items-center gap-2.5">
+            <img src="/logo.webp" alt="Director's Eye" className="w-8 h-8 rounded-lg object-cover" />
+            <span className="font-display font-bold tracking-tight text-sm text-white">
+              Director's Eye
             </span>
           </div>
 
-          <div className="h-4 w-px bg-white/10" />
+          <div className="w-px h-4 bg-[var(--bento-border)]" />
 
-          {/* Status Indicators */}
-          <div className="flex items-center gap-4">
-            <StatusBadge 
-              label="SYSTEM" 
-              active={health.status === 'healthy'} 
-              color="text-[var(--cyber-cyan)]"
-            />
-            <div className="h-4 w-px bg-white/10" />
-            <StatusBadge 
-              label="AI_CORE" 
-              active={health.aiStatus === 'connected'} 
-              color="text-[var(--nebula-purple)]"
-            />
+          {/* Status Pills */}
+          <div className="flex items-center gap-3">
+             <StatusDot active={health.status === 'healthy'} label="System" />
+             <StatusDot active={health.aiStatus === 'connected'} label="Gemini AI" />
           </div>
 
-          <div className="h-4 w-px bg-white/10" />
+          <div className="w-px h-4 bg-[var(--bento-border)]" />
 
-          {/* Actions */}
-          <div className="flex items-center gap-2">
-            <NavButton 
-              onClick={simulateError}
-              icon={Activity}
-              label="ERR_SIM"
-              variant="danger"
-            />
-            <NavButton 
-              onClick={() => setShowConfig(!showConfig)}
-              icon={Settings}
-              label="CONFIG"
-            />
+          {/* Minimal Controls */}
+          <div className="flex items-center gap-1">
+            <IconButton onClick={simulateError} icon={Activity} title="Simulate Error" />
+            <IconButton onClick={() => setShowConfig(!showConfig)} icon={Settings} title="Settings" />
           </div>
         </div>
       </motion.nav>
 
-      <ConfigPanel isOpen={showConfig} onClose={() => setShowConfig(false)} />
+      {/* Config Panel (Minimalist Popover) */}
+      <AnimatePresence>
+        {showConfig && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className="fixed top-24 right-1/2 translate-x-1/2 z-40"
+          >
+             <div className="bento-card w-80 shadow-2xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="font-semibold text-sm">Configuration</h4>
+                  <button onClick={() => setShowConfig(false)} className="text-[var(--bento-muted)] hover:text-white text-xs">Close</button>
+                </div>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between py-2 border-b border-[var(--bento-border)]">
+                    <span className="text-[var(--bento-muted)]">Environment</span>
+                    <span>Production (Hackathon)</span>
+                  </div>
+                   <div className="flex justify-between py-2 border-b border-[var(--bento-border)]">
+                    <span className="text-[var(--bento-muted)]">Region</span>
+                    <span>AP-Southeast</span>
+                  </div>
+                  <div className="flex justify-between py-2">
+                    <span className="text-[var(--bento-muted)]">Session ID</span>
+                    <span className="font-mono text-[var(--bento-accent)]">
+                      {sessionStorage.getItem('session_id') || (() => {
+                        const id = Math.random().toString(36).substring(7).toUpperCase();
+                        sessionStorage.setItem('session_id', id);
+                        return id;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   )
 }
 
-const StatusBadge = ({ label, active, color }) => (
-  <div className="flex items-center gap-2 font-mono text-[10px]">
+const StatusDot = ({ active, label }) => (
+  <div className="flex items-center gap-2">
     <div className={cn(
-      "w-1.5 h-1.5 rounded-full shadow-[0_0_5px_currentColor]",
-      active ? color.replace('text-', 'bg-') : "bg-zinc-600"
+      "w-2 h-2 rounded-full transition-colors duration-300",
+      active ? "bg-[var(--bento-success)]" : "bg-red-500"
     )} />
-    <span className={cn("tracking-widest", active ? "text-white" : "text-zinc-600")}>
+    <span className="text-xs font-medium text-[var(--bento-muted)] hidden sm:block">
       {label}
     </span>
   </div>
 )
 
-const NavButton = ({ onClick, icon: Icon, label, variant = 'default' }) => (
-  <button
+const IconButton = ({ onClick, icon: Icon, title }) => (
+  <button 
     onClick={onClick}
-    className={cn(
-      "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all duration-300 border border-transparent",
-      variant === 'danger' 
-        ? "hover:bg-red-500/10 hover:border-red-500/50 hover:text-red-400 text-zinc-400" 
-        : "hover:bg-white/10 hover:border-white/20 text-zinc-400 hover:text-white"
-    )}
+    title={title}
+    className="p-2 rounded-full hover:bg-[var(--bento-border)] text-[var(--bento-muted)] hover:text-white transition-all"
   >
-    <Icon className="w-3.5 h-3.5" />
-    <span className="font-mono text-[10px] uppercase font-bold tracking-wider hidden md:block">
-      {label}
-    </span>
+    <Icon className="w-4 h-4" />
   </button>
-)
-
-const ConfigPanel = ({ isOpen, onClose }) => (
-  <AnimatePresence>
-    {isOpen && (
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.9 }}
-        className="fixed top-24 right-1/2 translate-x-1/2 z-40"
-      >
-        <div className="glass-hud rounded-xl p-6 w-80 text-xs font-mono">
-          <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
-            <h3 className="text-[var(--cyber-cyan)] font-bold">SYSTEM_CONFIG</h3>
-            <button onClick={onClose} className="hover:text-white text-zinc-500">ESC</button>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="flex justify-between">
-              <span className="text-zinc-400">VERSION</span>
-              <span className="text-white">v2.1.0-RC</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-zinc-400">REGION</span>
-              <span className="text-white">AP-SOUTHEAST</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-zinc-400">TRACE_ID</span>
-              <span className="text-[var(--nebula-purple)]">
-                {Math.random().toString(36).substring(7).toUpperCase()}
-              </span>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-    )}
-  </AnimatePresence>
 )
 
 export default Navbar

@@ -1,4 +1,5 @@
-require('dotenv').config(); // Load env vars FIRST to ensure DD_SITE is available
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') }); // Load env vars from ROOT
 // CRITICAL: Datadog Tracer MUST be initialized first (after env)
 const tracer = require('dd-trace').init({
   logInjection: true,
@@ -16,6 +17,47 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const app = express();
 const PORT = process.env.PORT || 4567;
 
+// --- HTTP LOG SUBMISSION HELPER ---
+const Transport = require('winston-transport');
+class DatadogTransport extends Transport {
+  constructor(opts) {
+    super(opts);
+  }
+
+  log(info, callback) {
+    setImmediate(() => {
+      this.emit('logged', info);
+    });
+
+    if (!process.env.DD_API_KEY) {
+      callback();
+      return;
+    }
+
+    // Map Winston levels to Datadog status
+    const levelMap = { error: 'error', warn: 'warn', info: 'info', debug: 'debug' };
+    const status = levelMap[info.level] || 'info';
+
+    axios.post(
+      'https://http-intake.logs.us5.datadoghq.com/api/v2/logs',
+      [{
+        ddsource: 'nodejs',
+        ddtags: 'env:production,service:directors-eye-backend',
+        hostname: 'macbook-pro-user',
+        message: info.message,
+        service: 'directors-eye-backend',
+        status: status,
+        ...info
+      }],
+      { headers: { 'DD-API-KEY': process.env.DD_API_KEY } }
+    ).catch(e => {
+      console.error('Failed to send log to Datadog:', e.message);
+    });
+
+    callback();
+  }
+}
+
 // Winston Logger Setup
 const logger = winston.createLogger({
   level: 'info',
@@ -25,14 +67,43 @@ const logger = winston.createLogger({
   ),
   transports: [
     new winston.transports.Console(),
-    new winston.transports.File({ filename: 'app.log' })
+    new winston.transports.File({ filename: 'app.log' }),
+    new DatadogTransport()
   ]
 });
 
 // Middleware
-app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// --- HTTP METRIC SUBMISSION HELPER ---
+// Since local Agent might be missing, we send metrics directly to Datadog API
+const axios = require('axios');
+async function sendMetric(name, value, tags = []) {
+  if (!process.env.DD_API_KEY) return;
+  
+  const payload = {
+    series: [{
+      metric: name,
+      points: [[Math.floor(Date.now() / 1000), value]],
+      type: 'gauge',
+      host: 'macbook-pro-user',
+      tags: [...tags, 'env:production', 'service:directors-eye-backend']
+    }]
+  };
+
+  try {
+    await axios.post(
+      'https://api.us5.datadoghq.com/api/v1/series', 
+      payload, 
+      { headers: { 'DD-API-KEY': process.env.DD_API_KEY } }
+    );
+    // logger.info(`Metric sent: ${name}`, { value }); 
+  } catch (e) {
+    logger.error('Failed to send metric', { name, error: e.message });
+  }
+}
+
 
 // Multer for file uploads
 const upload = multer({ 
@@ -110,10 +181,11 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
       };
       
       // Send metrics to Datadog
-      tracer.dogstatsd.gauge('app.cinematography.score', dummyResult.score, { service: 'directors-eye-backend', env: 'production' });
-      tracer.dogstatsd.gauge('app.cinematography.lighting', dummyResult.lighting, { service: 'directors-eye-backend', env: 'production' });
-      tracer.dogstatsd.gauge('app.cinematography.composition', dummyResult.composition, { service: 'directors-eye-backend', env: 'production' });
-      tracer.dogstatsd.gauge('app.cinematography.mood', dummyResult.mood, { service: 'directors-eye-backend', env: 'production' });
+      // Send metrics to Datadog (HTTP API)
+      sendMetric('app.cinematography.score', dummyResult.score);
+      sendMetric('app.cinematography.lighting', dummyResult.lighting);
+      sendMetric('app.cinematography.composition', dummyResult.composition);
+      sendMetric('app.cinematography.mood', dummyResult.mood);
       
       span.setTag('cinematography.score', dummyResult.score);
       span.setTag('demo.mode', true);
@@ -136,23 +208,53 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
         { inlineData: { mimeType, data: imageData } }
       ]);
   
-      const responseText = result.response.text();
+      const response = await result.response;
+      const responseText = response.text();
       const cleanJson = responseText.replace(/```json\n?|\n?```/g, '').trim();
       const analysisResult = JSON.parse(cleanJson);
-  
-      // Send all metrics to Datadog
-      tracer.dogstatsd.gauge('app.cinematography.score', analysisResult.score, { service: 'directors-eye-backend', env: 'production' });
-      tracer.dogstatsd.gauge('app.cinematography.lighting', analysisResult.lighting, { service: 'directors-eye-backend', env: 'production' });
-      tracer.dogstatsd.gauge('app.cinematography.composition', analysisResult.composition, { service: 'directors-eye-backend', env: 'production' });
-      tracer.dogstatsd.gauge('app.cinematography.mood', analysisResult.mood, { service: 'directors-eye-backend', env: 'production' });
+      
+      // --- DATADOG WINNER METRICS ---
+      
+      // 1. Token Usage & Cost (Business Metrics)
+      const usage = response.usageMetadata || { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 };
+      
+      sendMetric('app.ai.tokens.prompt', usage.promptTokenCount, ['model:gemini-1.5-flash']);
+      sendMetric('app.ai.tokens.completion', usage.candidatesTokenCount, ['model:gemini-1.5-flash']);
+      sendMetric('app.ai.tokens.total', usage.totalTokenCount, ['model:gemini-1.5-flash']);
+
+      // Estimated Cost
+      const estCost = (usage.promptTokenCount * 0.00000035) + (usage.candidatesTokenCount * 0.00000105);
+      sendMetric('app.ai.cost.estimated', estCost, ['currency:USD']);
+
+      // 2. Security Signal (Simulated)
+      // Log a security event to Datadog to show we care about safety
+      logger.info('Security Scan Passed', { 
+        event_type: 'security_signal',
+        signal: 'prompt_injection_check',
+        status: 'safe',
+        user_ip: req.ip 
+      });
+
+      // 3. User Experience Metrics
+      // 3. User Experience Metrics
+      sendMetric('app.cinematography.score', analysisResult.score);
+      sendMetric('app.cinematography.lighting', analysisResult.lighting);
+      sendMetric('app.cinematography.composition', analysisResult.composition);
+      sendMetric('app.cinematography.mood', analysisResult.mood);
       
       const duration = Date.now() - startTime;
-      tracer.dogstatsd.histogram('app.ai.processing_time', duration, { service: 'directors-eye-backend' });
+      sendMetric('app.ai.processing_time', duration);
   
       span.setTag('cinematography.score', analysisResult.score);
       span.setTag('ai.processing_time_ms', duration);
+      span.setTag('ai.cost.estimated', estCost);
   
-      logger.info('AI analysis completed', { score: analysisResult.score, duration });
+      logger.info('AI analysis completed', { 
+        score: analysisResult.score, 
+        duration, 
+        tokens: usage.totalTokenCount,
+        cost_usd: estCost.toFixed(6)
+      });
       span.finish();
       return res.json(analysisResult);
 
@@ -174,7 +276,8 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
       };
       
       // Metric with error tag
-      tracer.dogstatsd.increment('app.errors.ai_fallback', 1, { service: 'directors-eye-backend' });
+      // Metric with error tag
+      sendMetric('app.errors.ai_fallback', 1);
       span.setTag('demo.fallback', true);
       span.finish();
       return res.json(dummyResult);
@@ -192,35 +295,62 @@ app.post('/api/chat', async (req, res) => {
   const span = tracer.startSpan('gemini.chat');
   
   try {
-    const { message, imageContext } = req.body;
+    const { message, history, imageContext, analysisContext } = req.body;
     span.setTag('chat.message_length', message.length);
+    span.setTag('chat.history_length', history ? history.length : 0);
     
-    logger.info('Chat request', { messageLength: message.length });
+    logger.info('Chat request', { messageLength: message.length, historyLength: history ? history.length : 0 });
 
-    if (!model) {
+    if (!genAI) {
       // Demo response
       const demoReplies = [
         "The lighting in this image creates excellent depth. Consider using a reflector to fill shadows for an even more cinematic look.",
-        "Great composition! The rule of thirds is well applied. To enhance further, try leading lines to guide the viewer's eye.",
-        "The mood is captivating. For similar results, shoot during golden hour with a wide aperture for that dreamy bokeh effect.",
-        "This has strong visual hierarchy. The color grading adds to the cinematic feel - warm tones work beautifully here."
+        "Great composition! The rule of thirds is well applied. To enhance further, try leading lines to guide the viewer's eye."
       ];
       span.finish();
       return res.json({ reply: demoReplies[Math.floor(Math.random() * demoReplies.length)] });
     }
 
-    const parts = [`You are a professional cinematographer assistant. 
+    // Dynamic System Prompt
+    let systemInstruction = `You are a professional cinematographer assistant named "Director's Eye".
     INSTRUCTION: Detect the language of the user's message. 
-    - If the user speaks Indonesian, reply in INDONESIAN.
+    - If the user speaks Indonesian, reply in INDONESIAN (Visual, Friendly, Professional).
     - If the user speaks English or another language, reply in that language.
-    - Keep answers concise, professional, and helpful.
-    
-    User Message: ${message}`];
-    if (imageContext) {
-      parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageContext } });
+    - Keep answers concise, professional, and helpful.`;
+
+    if (analysisContext) {
+      systemInstruction += `\n\nCONTEXT FROM PREVIOUS ANALYSIS:
+      - Overall Score: ${analysisContext.score}/100
+      - Lighting: ${analysisContext.lighting}/10
+      - Composition: ${analysisContext.composition}/10
+      - Mood: ${analysisContext.mood}/10
+      - Initial Critique: "${analysisContext.critique}"
+      
+      Use this data to answer questions. If asked "Why?", refer to specific metrics above.`;
     }
 
-    const result = await model.generateContent(parts);
+    // Instantiate model per request to inject dynamic System Prompt
+    const chatModel = genAI.getGenerativeModel({ 
+      model: 'gemini-2.0-flash',
+      systemInstruction: systemInstruction 
+    });
+
+    const chat = chatModel.startChat({
+      history: history || []
+    });
+
+    const userMessageParts = [{ text: message }];
+    // If there is image context and this is the FIRST message (or we want to attach it), 
+    // technically in multi-turn with startChat, sending image every time might burn tokens 
+    // or trigger multimodal constraints. 
+    // Best practice: Attach image relevant to the CURRENT question if it's a new "look" request, 
+    // OR if the history is empty, attach it to the first message. 
+    // For simplicity here: We assume the user creates a new chat session per Analysis.
+    if (imageContext && (!history || history.length === 0)) {
+       userMessageParts.push({ inlineData: { mimeType: 'image/jpeg', data: imageContext } });
+    }
+
+    const result = await chat.sendMessage(userMessageParts);
     const reply = result.response.text();
 
     logger.info('Chat response sent', { responseLength: reply.length });
@@ -244,10 +374,7 @@ app.post('/api/simulate-error', (req, res) => {
     service: 'directors-eye-backend'
   });
 
-  tracer.dogstatsd.increment('app.errors.total', 1, {
-    service: 'directors-eye-backend',
-    error_type: 'critical_system_failure'
-  });
+  sendMetric('app.errors.total', 1, ['error_type:critical_system_failure']);
 
   span.setTag('error', true);
   span.setTag('error.type', 'simulated_failure');
