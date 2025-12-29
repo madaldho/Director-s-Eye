@@ -89,7 +89,8 @@ You will need API keys from the following services:
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/madaldho/Directors-Eye.git
+    git clone https://github.com/madaldho/Director-s-Eye.git
+    
     cd Directors-Eye
     ```
 
