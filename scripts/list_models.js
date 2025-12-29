@@ -5,7 +5,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.G
 
 async function listModels() {
   try {
-    const models = await genAI.getGenerativeModel({ model: "gemini-1.5-flash" }).getGenerativeModelResponse; 
+    const models = await genAI.getGenerativeModel({ model: "gemini-2.0-flash" }).getGenerativeModelResponse; 
     // Actually the SDK logic is different, let's just use the list endpoint if possible, 
     // or try to instantiate the requested model.
     
@@ -13,8 +13,9 @@ async function listModels() {
     
     const candidates = [
         'gemini-2.0-flash-exp', 
-        'gemini-2.0-flash', 
-        'gemini-1.5-flash',
+        'gemini-2.5-flash', 
+        'gemini-2.5-flash-lite',
+        'gemini-2.0-flash',
         'gemini-3.0-flash'
     ];
 

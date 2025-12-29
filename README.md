@@ -1,96 +1,197 @@
-# 🎬 Director's Eye (AI Datadog)
+# 🎬 Director's Eye
 
-**Director's Eye** is an intelligent cinematography analysis application that combines the power of Generative AI (Google Gemini) with advanced observability (Datadog). This application is designed to win the "AI Accelerate Hackathon" by delivering a premium user experience and high system reliability.
+**Director's Eye** is an intelligent, personality-driven **AI Cinematography Mentor**. It doesn't just analyze photos; it *directs* you. Accessing the wisdom of legendary filmmakers, it provides real-time, high-precision feedback on lighting, composition, and mood.
 
-## 🌟 Key Features
+> *"More than a tool, it's a creative partner with a soul."*
 
-- **AI Vision Analysis**: Uses Google Gemini 1.5 Flash to deeply analyze lighting, composition, and mood of photos.
-- **Real-time Observability**: Full Datadog integration (APM, RUM, Logs, Metrics) to monitor application performance end-to-end.
-- **Premium Interface**: Modern design with dark theme, glassmorphism, and smooth animations, fully internationalized in English.
-- **Smart Demo Mode**: Automatic fallback system ensuring the app runs smoothly even when API quotas are exhausted or network issues occur.
-- **AI Director Chat**: Interactive feature to discuss technical photography aspects with the AI.
+Built with a focus on **Visual Experience** and **System Reliability**, Director's Eye bridges the gap between creative intuition and engineering precision.
 
-## 🛠️ Technology Stack
 
-- **Frontend**: React, Vite, Tailwind CSS, Framer Motion, Datadog RUM.
-- **Backend**: Node.js, Express, Google Generative AI SDK, Datadog Tracer (dd-trace), Winston Logger.
-- **Observability**: Datadog APM, Custom Metrics (DogStatsD), Log Management.
+## ✨ Key Features
 
-## 🚀 How to Run
+### 🎨 For Creatives (The Vibe)
+*   **The Director Persona**: Chat with an AI that has opinions, style, and deep cinematic knowledge. 
+*   **Premium Aesthetic**: A dark-themed, glassmorphic interface designed for creative immersion with smooth animations.
+*   **Instant Insight**: Magic Edit suggestions that visualize potential improvements instantly using Generative AI.
+*   **Cinematography Scoring**: Get an objective "Quality Score" for every image based on professional visual criteria.
 
-### Requirements
-- Node.js version 18+
-- Datadog Account (API Key & App Key)
-- Google Cloud Account (Gemini API Key)
+### ⚙️ For Engineers (The Tech)
+*   **End-to-End Observability**: Full distributed tracing (`dd-trace`) from the React frontend to the Node.js backend and Gemini AI service.
+*   **LLM Monitoring**: Tracks Token Usage, Cost, and Hallucinations for every AI inference.
+*   **Custom Business Metrics**: Real-time tracking of `app.quality_score` and user engagement via DogStatsD.
+*   **Reliability First**: Alerting pipelines for high error rates and latency spikes.
 
-### 1. Install Dependencies
-Run the following commands in the project root:
+## 🛠️ Technologies Used
+
+### Frontend
+*   **React (Vite)**: For a blazing fast UI.
+*   **Tailwind CSS**: For custom, premium styling.
+*   **Framer Motion**: For fluid UI transitions.
+*   **Datadog RUM**: For real user monitoring and session replay.
+
+### Backend
+*   **Node.js & Express**: Serverless-ready backend architecture.
+*   **Google Gemini 2.5 Flash Lite**: Multimodal AI for sub-second image analysis.
+*   **Datadog APM**: Distributed tracing and backend performance monitoring.
+
+---
+
+### Observability Strategy
+| Signal Type | Implementation |
+|:---|:---|
+| **APM Tracing** | `dd-trace` auto-instrumentation + custom spans for AI calls |
+| **Custom Metrics** | Token usage, cost estimation, cinematography scores |
+| **RUM** | Session tracking, replay, user interactions |
+| **Browser Logs** | Error forwarding to Datadog Logs |
+
+### Detection Rules (3 Monitors)
+1. **[High Error Rate](./monitor_error_rate.json)** - Triggers when errors exceed 1%
+2. **[High Latency](./monitor_latency.json)** - Triggers when response time exceeds 5 seconds
+3. **[Low Quality Score](./monitor_quality_score.json)** - Triggers when AI score drops below 50
+
+### SLO
+- **Name**: Director's Eye - API Response Time SLO
+- **Target**: 99% of requests complete successfully
+- **Timeframe**: 30 days rolling
+- **Config**: [slo_created.json](./slo_created.json)
+
+### Incident Management
+Automated incident creation via API when monitors trigger. See [scripts/create-incident.js](./scripts/create-incident.js).
+
+
+### Exported Configurations
+All Datadog configurations exported as JSON:
+- `datadog_dashboard.json` - Main observability dashboard
+- `monitor_error_rate.json` - Error rate monitor
+- `monitor_latency.json` - Latency monitor  
+- `monitor_quality_score.json` - Quality score monitor
+- `slo_created.json` - SLO definition
+
+---
+
+## 🚀 Getting Started
+
+Follow these instructions to get the project up and running on your local machine for development and testing purposes.
+
+### Prerequisites
+
+Ensure you have the following installed on your machine:
+*   **Node.js**: v18.0.0 or higher.
+*   **Python**: v3.8 or higher 
+*   **Git**: Latest version. 
+
+### 🔑  API Keys Required
+You will need API keys from the following services:
+1.  **Google AI Studio**: Get your API key [here](https://aistudio.google.com/).
+2.  **Datadog**: Create a free account and get your API Key and Client Token [here](https://app.datadoghq.com/).
+
+### 💻 Installation
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/madaldho/Directors-Eye.git
+    cd Directors-Eye
+    ```
+
+2.  **Install project dependencies (Root, Client, & Server):**
+    We have a unified script to install everything at once.
+    ```bash
+    npm run install-all
+    ```
+    *Alternatively, you can install manually:*
+    ```bash
+    npm install         # Root setup
+    cd client && npm install # Client dependencies
+    cd ../server && npm install # Server dependencies
+    cd ..
+    ```
+
+3.  **Environment Configuration:**
+    Create a `.env` file in the root directory by copying the example.
+    ```bash
+    cp .env.example .env
+    ```
+    
+    **Update `.env` with your credentials:**
+    
+    | Variable | Description | Example Value |
+    | :--- | :--- | :--- |
+    | `GEMINI_API_KEY` | Your Google Gemini API Key | `AIzaSy...` |
+    | `DD_API_KEY` | Datadog API Key (Backend) | `e1a7...` |
+    | `DD_SITE` | Datadog Site Region | `us5.datadoghq.com` |
+    | `VITE_DD_CLIENT_TOKEN` | Datadog Client Token (Frontend) | `pub2f...` |
+    | `VITE_DD_APPLICATION_ID` | Datadog RUM App ID | `b3c4...` |
+
+### ▶️ Running the Application
+
+You need to run **both Backend and Frontend** to use the application.
+
+#### Option 1: Quick Start (Single Command)
+
+Run both Client and Server concurrently:
 
 ```bash
-# Install root dependencies (for scripts)
-npm install
-
-# Install backend
-cd server
-npm install
-
-# Install frontend
-cd ../client
-npm install
+npm run dev
 ```
 
-### 2. Environment Configuration
-Ensure `.env` in the project root is correctly filled:
-```env
-# Datadog
-DD_API_KEY=...
-DD_SITE=datadoghq.com
-DD_SERVICE=directors-eye-backend
-DD_ENV=production
+#### Option 2: Manual Startup (Two Terminals)
 
-# Google AI
-GOOGLE_API_KEY=... (or GEMINI_API_KEY)
+**Terminal 1 - Start Backend Server:**
 
-# Server
-PORT=3000
-```
-And in `client/.env`:
-```env
-VITE_DD_APPLICATION_ID=...
-VITE_DD_CLIENT_TOKEN=...
-```
-
-### 3. Run Application
-Open two separate terminals:
-
-**Terminal 1 (Backend):**
 ```bash
 cd server
 node index.js
 ```
 
-**Terminal 2 (Frontend):**
+You should see:
+```
+🎬 Directors Eye Backend running on port 4567
+🤖 AI Status: Connected
+```
+
+**Terminal 2 - Start Frontend:**
+
 ```bash
 cd client
 npm run dev
 ```
-Access the application at `http://localhost:5173`.
 
-## 🚦 Traffic Generator (For Datadog Validation)
-Per hackathon requirements, we include a script to generate artificial traffic to test Datadog dashboards and alerts.
-
-```bash
-node scripts/traffic-generator.js
+You should see:
 ```
-This script will simulate success and error requests periodically to trigger metrics and trace graphs in Datadog.
+VITE ready in XXXms
+➜ Local: http://localhost:3000/
+```
 
-## 🏆 Competition Compliance (Validation Rules)
-1.  **Google Vertex AI/Gemini**: App uses official SDK.
-2.  **Datadog Observability**:
-    - **Tracing**: Implemented via `dd-trace` in `server/index.js`.
-    - **Metrics**: Custom metrics (`app.cinematography.score`, etc) sent via `dogstatsd`.
-    - **Logs**: Winston logger integrated with trace ID injection.
-    - **RUM**: User interaction tracking in `HomePage.jsx` and `AnalysisPage.jsx`.
+#### Access the Application
 
----
-*Developed by Muhamad Ali Ridho for Datadog AI Accelerator Hackathon.*
+*   **Frontend**: Open [http://localhost:3000](http://localhost:3000)
+*   **Backend API**: Running on `http://localhost:4567`
+
+> **Note**: Make sure Backend is running FIRST before using the Frontend.
+
+## 🚦 Traffic Generator (For Demo & Testing)
+
+To demonstrate the **End-to-End Observability** features (Alerts, Traces, Metrics) without waiting for real users, use the included Python traffic generator.
+
+### 1. Setup Python Environment
+```bash
+# Ensure you are in the root directory
+pip install requests
+```
+
+### 2. Run the Generator
+```bash
+python3 traffic.py
+```
+
+### 3. What it does?
+The script will endlessly loop through these scenarios to populate your Datadog Dashboard:
+*   ✅ **Standard Analysis**: Sends valid images to be analyzed (Success 200 OK).
+*   💬 **Chat Simulation**: Converses with the AI "Director" about lighting and composition.
+*   ⚠️ **Latency Spikes**: Simulates slow network conditions to trigger Latency Monitors.
+*   ❌ **Errors**: Intentionally triggers 500 Errors to test Error Rate Monitors.
+
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.

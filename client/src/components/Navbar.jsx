@@ -28,7 +28,9 @@ const Navbar = () => {
     datadogRum.addAction('simulate_error_click', { component: 'navbar' })
     try {
       await axios.post('/api/simulate-error')
-    } catch (err) { }
+    } catch (err) {
+      // Intentionally ignored for simulation
+    }
   }
 
   return (
@@ -41,11 +43,16 @@ const Navbar = () => {
       >
         <div className="bg-[var(--bento-card)]/80 backdrop-blur-md border border-[var(--bento-border)] rounded-full px-5 py-2.5 flex items-center gap-6 shadow-xl shadow-black/20 pointer-events-auto">
           {/* Brand */}
-          <div className="flex items-center gap-2.5">
+          <a href="/" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
             <img src="/logo.webp" alt="Director's Eye" className="w-8 h-8 rounded-lg object-cover" />
             <span className="font-display font-bold tracking-tight text-sm text-white">
               Director's Eye
             </span>
+          </a>
+          {/* 
+            Refaktor: 
+            1. Mengubah pembungkus brand dari <div> menjadi tag <a> dengan href="/" agar bisa diklik ke halaman utama.
+            2. Menambahkan class 'hover:opacity-80' dan 'transition-opacity' untuk memberikan
           </div>
 
           <div className="w-px h-4 bg-[var(--bento-border)]" />
@@ -73,25 +80,22 @@ const Navbar = () => {
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="fixed top-24 right-1/2 translate-x-1/2 z-40"
+            className="fixed top-24 inset-x-6 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 z-40 flex justify-center"
           >
-             <div className="bento-card w-80 shadow-2xl">
+             <div className="bento-card w-full max-w-80 shadow-2xl">
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="font-semibold text-sm">Configuration</h4>
                   <button onClick={() => setShowConfig(false)} className="text-[var(--bento-muted)] hover:text-white text-xs">Close</button>
                 </div>
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between py-2 border-b border-[var(--bento-border)]">
-                    <span className="text-[var(--bento-muted)]">Environment</span>
-                    <span>Production (Hackathon)</span>
+                    <span className="text-[var(--bento-muted)]">Environment </span>
+                    <span> Production</span>
                   </div>
-                   <div className="flex justify-between py-2 border-b border-[var(--bento-border)]">
-                    <span className="text-[var(--bento-muted)]">Region</span>
-                    <span>AP-Southeast</span>
-                  </div>
+                  
                   <div className="flex justify-between py-2">
                     <span className="text-[var(--bento-muted)]">Session ID</span>
-                    <span className="font-mono text-[var(--bento-accent)]">
+                    <span className="font-mono text-[var(--bento-accent)] truncate ml-4">
                       {sessionStorage.getItem('session_id') || (() => {
                         const id = Math.random().toString(36).substring(7).toUpperCase();
                         sessionStorage.setItem('session_id', id);

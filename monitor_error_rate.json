@@ -1,0 +1,27 @@
+{
+	"id": 17316812,
+	"name": "[High Urgency] High Error Rate (>1%)",
+	"type": "query alert",
+	"query": "sum(last_5m):sum:trace.express.request.errors{service:directors-eye-backend}.as_count() / sum:trace.express.request.hits{service:directors-eye-backend}.as_count() > 0.01",
+	"message": "Critical error rate detected in Director's Eye backend. \n\n@pagerduty",
+	"tags": [
+		"env:production",
+		"service:directors-eye-backend",
+		"team:ai"
+	],
+	"options": {
+		"thresholds": {
+			"critical": 0.01,
+			"warning": 0.005
+		},
+		"notify_no_data": false,
+		"notify_audit": false,
+		"new_host_delay": 300,
+		"include_tags": true,
+		"escalation_message": "Error rate still elevated. Check runbook for resolution steps.",
+		"renotify_interval": 60,
+		"runbook_url": "https://github.com/madaldho/Directors-Eye/blob/main/docs/TROUBLESHOOTING.md#-high-error-rate-1"
+	},
+	"priority": null,
+	"draft_status": "published"
+}

@@ -1,0 +1,36 @@
+{
+  "id": "06e4e8f75ae753cda42a25276b9032f9",
+  "name": "Director's Eye - API Response Time SLO",
+  "tags": [
+    "env:production",
+    "challenge:datadog-hackathon",
+    "team:ai",
+    "service:directors-eye-backend"
+  ],
+  "monitor_tags": [],
+  "thresholds": [
+    {
+      "timeframe": "30d",
+      "target": 99,
+      "target_display": "99.",
+      "warning": 99.5,
+      "warning_display": "99.5"
+    }
+  ],
+  "type": "monitor",
+  "type_id": 0,
+  "description": "99% of API requests complete successfully within expected time",
+  "timeframe": "30d",
+  "warning_threshold": 99.5,
+  "target_threshold": 99,
+  "monitor_ids": [
+    17316813
+  ],
+  "creator": {
+    "name": "madaldho Backpack",
+    "handle": "aldhoproject@gmail.com",
+    "email": "aldhoproject@gmail.com"
+  },
+  "created_at": 1766967325,
+  "modified_at": 1766967325
+}

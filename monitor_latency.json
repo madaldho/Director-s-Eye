@@ -1,0 +1,27 @@
+{
+	"id": 17316813,
+	"name": "[Performance] High Latency (>5s)",
+	"type": "query alert",
+	"query": "avg(last_5m):avg:trace.express.request.duration{service:directors-eye-backend} > 5",
+	"message": "API Latency is degrading. Check Gemini API response times.\n\n@slack-alerts",
+	"tags": [
+		"env:production",
+		"service:directors-eye-backend",
+		"performance"
+	],
+	"options": {
+		"thresholds": {
+			"critical": 5,
+			"warning": 3
+		},
+		"notify_no_data": false,
+		"notify_audit": false,
+		"new_host_delay": 300,
+		"include_tags": true,
+		"escalation_message": "Latency still high. Check Gemini API status and runbook.",
+		"renotify_interval": 30,
+		"runbook_url": "https://github.com/madaldho/Directors-Eye/blob/main/docs/TROUBLESHOOTING.md#-high-latency-5s"
+	},
+	"priority": null,
+	"draft_status": "published"
+}

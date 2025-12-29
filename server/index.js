@@ -10,8 +10,10 @@ const tracer = require('dd-trace').init({
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const multer = require('multer');
 const winston = require('winston');
+const axios = require('axios'); // Moved to top - used in DatadogTransport
 const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
@@ -51,7 +53,7 @@ class DatadogTransport extends Transport {
       }],
       { headers: { 'DD-API-KEY': process.env.DD_API_KEY } }
     ).catch(e => {
-      console.error('Failed to send log to Datadog:', e.message);
+      // Silent fail - don't break app if Datadog log submission fails
     });
 
     callback();
@@ -72,13 +74,14 @@ const logger = winston.createLogger({
   ]
 });
 
-// Middleware
+// Security & Middleware
+app.use(helmet()); // Security headers
+app.use(cors());   // Enable CORS
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // --- HTTP METRIC SUBMISSION HELPER ---
 // Since local Agent might be missing, we send metrics directly to Datadog API
-const axios = require('axios');
 async function sendMetric(name, value, tags = []) {
   if (!process.env.DD_API_KEY) return;
   
@@ -144,7 +147,7 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
   const startTime = Date.now();
   
   try {
-    span.setTag('ai.model', 'gemini-1.5-flash');
+    span.setTag('ai.model', 'gemini-2.0-flash');
     span.setTag('app.version', 'v1.0');
     
     logger.info('Starting image analysis', { 
@@ -164,8 +167,9 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
       throw new Error('No image provided');
     }
 
-    // Demo Mode - Always works
-    if (req.body.demoMode === 'true' || !model) {
+    // Real AI Analysis - Only if genAI is available
+    if (!genAI) {
+      // No API Key - Return Demo Mode
       const scores = {
         score: Math.floor(Math.random() * 25) + 75,
         lighting: Math.floor(Math.random() * 2) + 8,
@@ -173,45 +177,44 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
         mood: Math.floor(Math.random() * 2) + 8,
       };
       
-      const dummyResult = {
+      const demoResult = {
         ...scores,
-        critique: `This image demonstrates ${scores.score >= 85 ? 'excellent' : 'strong'} cinematographic qualities. The lighting creates ${scores.lighting >= 9 ? 'exceptional' : 'effective'} depth and atmosphere. Composition follows classical principles with ${scores.composition >= 9 ? 'masterful' : 'skilled'} use of visual hierarchy. The overall mood is ${scores.mood >= 9 ? 'captivating' : 'engaging'} and professionally executed.`,
-        prompt: `cinematic photography, ${scores.lighting >= 9 ? 'dramatic' : 'natural'} lighting, rule of thirds, ${scores.mood >= 9 ? 'moody' : 'warm'} color grading, shallow depth of field, 85mm lens, golden hour, film grain, professional quality --ar 16:9 --style raw --v 6`
+        critique: `[DEMO] No API Key configured. This is a simulated result. ${scores.score >= 85 ? 'Excellent' : 'Strong'} cinematographic qualities detected.`,
+        prompt: `cinematic photography, dramatic lighting, rule of thirds, moody color grading, shallow depth of field, 85mm lens --ar 16:9 --v 6`
       };
       
-      // Send metrics to Datadog (HTTP API)
-      sendMetric('app.cinematography.score', dummyResult.score);
-      sendMetric('app.cinematography.lighting', dummyResult.lighting);
-      sendMetric('app.cinematography.composition', dummyResult.composition);
-      sendMetric('app.cinematography.mood', dummyResult.mood);
-      
-      // SIMULATE AI METRICS FOR DASHBOARD (Winner Features)
-      const simTokens = Math.floor(Math.random() * 500) + 200;
-      const simCost = (simTokens * 0.00000035).toFixed(6);
-      sendMetric('app.ai.tokens.prompt', Math.floor(simTokens * 0.2));
-      sendMetric('app.ai.tokens.completion', Math.floor(simTokens * 0.8));
-      sendMetric('app.ai.tokens.total', simTokens);
-      sendMetric('app.ai.cost.estimated', parseFloat(simCost));
-      
-      span.setTag('cinematography.score', dummyResult.score);
+      sendMetric('app.cinematography.score', demoResult.score);
       span.setTag('demo.mode', true);
-      
-      logger.info('Demo analysis completed', { score: dummyResult.score, simulated_tokens: simTokens });
+      logger.info('Demo analysis (no API key)', { score: demoResult.score });
       span.finish();
-      return res.json(dummyResult);
+      return res.json(demoResult);
     }
 
     // Real AI Analysis
     try {
-      if (!genAI) throw new Error('Model not initialized');
+    const promptStr = `You are a professional cinematography analyst. Analyze this image.
+    ALL YOUR RESPONSES MUST BE IN ENGLISH.
 
-      const promptStr = `Analyze this image for cinematography. 
-    Focus on: 1. Lighting & Contrast 2. Color Palette 3. Composition (Rule of Thirds, Balance) 4. Emotional Tone.
-    Return JSON with keys: lighting, color, composition, mood, overall_score (1-100).
-    Keep points concise. Language: English.`;
+    STRICT JSON OUTPUT FORMAT REQUIRED:
+    {
+      "lighting": <number 1-10>,
+      "composition": <number 1-10>,
+      "mood": <number 1-10>,
+      "color": "<short color palette description in English>",
+      "score": <number 1-100>,
+      "critique": "<2-3 sentence professional analysis in English>",
+      "prompt": "<detailed Midjourney/Stable Diffusion style prompt in English to recreate this image>"
+    }
+    
+    CRITICAL RULES:
+    - "lighting", "composition", "mood" MUST be INTEGER NUMBERS (1-10 scale), NOT text descriptions.
+    - "score" MUST be an INTEGER NUMBER (1-100 scale).
+    - EVERYTHING must be in English. NEVER use Indonesian.
+    - "critique" should be a concise professional summary.
+    - "prompt" should describe the SUBJECT, ACTION, SCENE + technical camera details.`;
 
     const response = await genAI.models.generateContent({
-      model: 'models/gemini-2.5-flash-lite',
+      model: 'gemini-2.0-flash',
       contents: [
         {
           role: 'user',
@@ -238,9 +241,9 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
       // 1. Token Usage & Cost (Business Metrics)
       const usage = response.usageMetadata || { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 };
       
-      sendMetric('app.ai.tokens.prompt', usage.promptTokenCount, ['model:gemini-2.5-flash-lite']);
-      sendMetric('app.ai.tokens.completion', usage.candidatesTokenCount, ['model:gemini-2.5-flash-lite']);
-      sendMetric('app.ai.tokens.total', usage.totalTokenCount, ['model:gemini-2.5-flash-lite']);
+      sendMetric('app.ai.tokens.prompt', usage.promptTokenCount, ['model:gemini-2.0-flash']);
+      sendMetric('app.ai.tokens.completion', usage.candidatesTokenCount, ['model:gemini-2.0-flash']);
+      sendMetric('app.ai.tokens.total', usage.totalTokenCount, ['model:gemini-2.0-flash']);
 
       // Estimated Cost
       const estCost = (usage.promptTokenCount * 0.00000035) + (usage.candidatesTokenCount * 0.00000105);
@@ -255,7 +258,6 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
         user_ip: req.ip 
       });
 
-      // 3. User Experience Metrics
       // 3. User Experience Metrics
       sendMetric('app.cinematography.score', analysisResult.score);
       sendMetric('app.cinematography.lighting', analysisResult.lighting);
@@ -286,7 +288,7 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
     } catch (aiError) {
       logger.error('AI Analysis failed, falling back to Demo Mode', { error: aiError.message });
       
-      // FALLBACK TO DEMO MODE
+      // FALLBACK TO DEMO MODE (so app never breaks)
       const scores = {
         score: Math.floor(Math.random() * 25) + 75,
         lighting: Math.floor(Math.random() * 2) + 8,
@@ -296,12 +298,10 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
       
       const dummyResult = {
         ...scores,
-        critique: `[DEMO MODE] The AI service is currently unavailable, but here is a simulated analysis. This image demonstrates ${scores.score >= 85 ? 'excellent' : 'strong'} cinematographic qualities. The lighting creates ${scores.lighting >= 9 ? 'exceptional' : 'effective'} depth and atmosphere. Composition follows classical principles.`,
+        critique: `[FALLBACK] AI service temporarily unavailable. Simulated analysis: ${scores.score >= 85 ? 'Excellent' : 'Strong'} cinematographic qualities. Lighting: ${scores.lighting >= 9 ? 'exceptional' : 'effective'}. Composition follows classical principles.`,
         prompt: `cinematic photography, ${scores.lighting >= 9 ? 'dramatic' : 'natural'} lighting, rule of thirds, ${scores.mood >= 9 ? 'moody' : 'warm'} color grading, shallow depth of field, 85mm lens, golden hour, film grain, professional quality --ar 16:9 --style raw --v 6`
       };
       
-      // Metric with error tag
-      // Metric with error tag
       sendMetric('app.errors.ai_fallback', 1);
       span.setTag('demo.fallback', true);
       span.finish();
@@ -341,57 +341,87 @@ app.post('/api/chat', async (req, res) => {
       return res.json({ reply: demoReplies[Math.floor(Math.random() * demoReplies.length)] });
     }
 
-    // Dynamic System Prompt
-    let systemInstruction = `You are a professional cinematographer assistant named "Director's Eye".
-    INSTRUCTION: Detect the language of the user's message. 
-    - If the user speaks Indonesian, reply in INDONESIAN (Visual, Friendly, Professional).
-    - If the user speaks English or another language, reply in that language.
-    - Keep answers concise, professional, and helpful.`;
+    // Dynamic System Prompt - Authority & Expertise (Visual & Berwibawa)
+    const systemInstruction = `You are "The Director", a world-class AI cinematography mentor.
+    Your mission is to guide users to create cinematic masterpieces.
 
-    if (analysisContext) {
-      systemInstruction += `\n\nCONTEXT FROM PREVIOUS ANALYSIS:
-      - Overall Score: ${analysisContext.score}/100
-      - Lighting: ${analysisContext.lighting}/10
-      - Composition: ${analysisContext.composition}/10
-      - Mood: ${analysisContext.mood}/10
-      - Initial Critique: "${analysisContext.critique}"
-      
-      Use this data to answer questions. If asked "Why?", refer to specific metrics above.`;
-    }
-
-    // Instantiate model per request to inject dynamic System Prompt
-    const chatModel = genAI.getGenerativeModel({ 
-      model: 'gemini-2.0-flash',
-      systemInstruction: systemInstruction 
-    });
-
-    const chat = chatModel.startChat({
-      history: history || []
-    });
-
-    const userMessageParts = [{ text: message }];
-    // If there is image context and this is the FIRST message (or we want to attach it), 
-    // technically in multi-turn with startChat, sending image every time might burn tokens 
-    // or trigger multimodal constraints. 
-    // Best practice: Attach image relevant to the CURRENT question if it's a new "look" request, 
-    // OR if the history is empty, attach it to the first message. 
-    // For simplicity here: We assume the user creates a new chat session per Analysis.
-    if (imageContext && (!history || history.length === 0)) {
-       userMessageParts.push({ inlineData: { mimeType: 'image/jpeg', data: imageContext } });
-    }
-
-    const result = await chat.sendMessage(userMessageParts);
-    const response = await result.response;
-    let reply = "I'm not sure how to respond to that.";
+    🌍 LANGUAGE ADAPTATION (CRITICAL):
+    - **DETECT the user's language** from their message.
+    - **RESPOND in the SAME language** the user uses.
+    - If user writes in Indonesian → Reply in Indonesian.
+    - If user writes in English → Reply in English.
+    - If user writes in Sundanese → Reply in Sundanese.
+    - If user writes in Arabic → Reply in Arabic.
+    - If user writes in Japanese, Korean, French, Spanish, etc. → Reply in that language.
+    - If mixed languages, follow the DOMINANT language of the latest message.
+    - Default language (if unclear): English.
     
-    // Robust parsing for new SDK
-    if (typeof response.text === 'function') {
-      reply = response.text();
-    } else if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
-      reply = response.candidates[0].content.parts.map(p => p.text).join('') || reply;
+    RESPONSE FORMATTING (VERY IMPORTANT):
+    - Use proper Markdown formatting.
+    - Break response into short, readable paragraphs.
+    - Use **bold** for key terms.
+    - Use bullet points for lists.
+
+    STRICT RULES:
+    1. NEVER mention internal technical tags like "[DIRECTOR_HUD_DATA_INJECTED]".
+    2. Treat HUD data as your own eyes/observation.
+    3. Be helpful, inspiring, but honest about flaws.`;
+
+    // Inject "Director HUD" for absolute context awareness
+    let hudPrefix = "";
+    // Inject context as a natural observation instead of a technical tag
+    let contextObservation = "";
+    if (analysisContext) {
+      contextObservation = `(VISUAL CONTEXT: Score=${analysisContext.score}/100. Lighting=${analysisContext.lighting}. Composition=${analysisContext.composition}. Mood=${analysisContext.mood}. Critique=${analysisContext.critique}. GENERATED_PROMPT=${analysisContext.prompt})\n\n`;
     }
 
-    logger.info('Chat response sent', { responseLength: reply.length });
+    const userMessageParts = [
+      { text: contextObservation + message }
+    ];
+
+    if (imageContext) {
+      userMessageParts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: imageContext
+        }
+      });
+    }
+
+    // Call generateContent with Gemini 2.5 Flash Lite - Unlimited RPD
+    const response = await genAI.models.generateContent({
+      model: 'models/gemini-2.5-flash-lite',
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      contents: [
+        ...(history || []),
+        { role: 'user', parts: userMessageParts }
+      ]
+    });
+
+    let reply = "";
+    
+    try {
+      // @google/genai uses .text as a property, not a function
+      reply = response.text || "";
+      if (!reply && response.candidates && response.candidates[0].content.parts[0].text) {
+         reply = response.candidates[0].content.parts[0].text;
+      }
+    } catch (e) {
+      logger.error('Failed to extract text from Gemini response', { error: e.message });
+      reply = "Saya sudah menganalisis frame ini, tapi saya butuh waktu sejenak untuk merapikan catatan saya. Bisa tolong ulangi pertanyaannya?";
+    }
+
+    // FINAL CLEANUP: Remove any technical tags if the AI accidentally parrots them
+    reply = reply.replace(/\[DIRECTOR_HUD.*?\]/gi, '')
+                 .replace(/TECHNICAL_OBSERVATION:?/gi, '')
+                 .replace(/\(TECHNICAL OBSERVATION:.*?\)/gi, '')
+                 .replace(/Based on HUD data.*?/gi, 'Based on my analysis...')
+                 .replace(/Based on technical observation.*?/gi, 'Based on my observation...')
+                 .trim();
+
+    if (!reply) reply = "This shot has compelling qualities. What specific feedback would you like?";
+
+    logger.info('Chat response sent (Flash Lite Mode - Unlimited RPD)', { responseLength: reply.length });
     span.finish();
     res.json({ reply });
 
@@ -462,8 +492,9 @@ app.post('/api/edit-image', async (req, res) => {
     I will provide an image and you will generate a NEW VERSION of it based on this request: "${prompt}".
     Return the result as a new image. If you need to explain, do it briefly in text.`;
 
+    // Call generateContent with gemini-2.5-flash-image
     const response = await genAI.models.generateContent({
-      model: 'models/gemini-3-pro-image-preview',
+      model: 'models/gemini-2.5-flash-image',
       contents: [
         {
           role: 'user',
@@ -485,14 +516,18 @@ app.post('/api/edit-image', async (req, res) => {
     let reply = "Image generated!";
     let editedImageBase64 = null;
 
-    const parts = response.candidates[0].content.parts;
-    for (const part of parts) {
-      if (part.text) {
-        reply = part.text;
+    try {
+      const parts = response.candidates[0].content.parts;
+      for (const part of parts) {
+        if (part.text) {
+          reply = part.text;
+        }
+        if (part.inlineData && part.inlineData.mimeType.startsWith('image/')) {
+          editedImageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        }
       }
-      if (part.inlineData && part.inlineData.mimeType.startsWith('image/')) {
-        editedImageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
+    } catch (e) {
+      logger.error('Magic Edit parsing failed', { error: e.message });
     }
 
     sendMetric('app.ai.edit.success', 1);
@@ -536,8 +571,13 @@ app.post('/api/simulate-error', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
-  console.log(`🎬 Directors Eye Backend running on port ${PORT}`);
-  console.log(`🤖 AI Status: ${genAI ? 'Connected' : 'Demo Mode Only'}`);
-});
+// Only start the server if not running in Vercel (local dev or VPS)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    logger.info(`🎬 Directors Eye Backend running on port ${PORT}`);
+    logger.info(`🤖 AI Status: ${genAI ? 'Connected' : 'Demo Mode Only'}`);
+  });
+}
+
+// Export for Vercel Serverless
+module.exports = app;

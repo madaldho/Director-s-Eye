@@ -14,6 +14,7 @@ import {
   Info
 } from 'lucide-react'
 import axios from 'axios'
+import ReactMarkdown from 'react-markdown'
 import { cn } from '../lib/utils'
 
 const AnalysisPage = ({ result, image, onTelemetryLog }) => {
@@ -22,6 +23,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const [isChatting, setIsChatting] = useState(false)
 
   const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [copiedSummary, setCopiedSummary] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
   
   // Edit State
@@ -29,9 +31,20 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const [editPrompt, setEditPrompt] = useState('')
   const [isGeneratingEdit, setIsGeneratingEdit] = useState(false)
   const [editedImage, setEditedImage] = useState(null)
-  const [editCount, setEditCount] = useState(0)
+  const MAX_EDITS = 5
+  
+  // Persistent daily quota
+  const [editCount, setEditCount] = useState(() => {
+    const saved = localStorage.getItem('magic_edit_quota')
+    if (saved) {
+      const { date, count } = JSON.parse(saved)
+      const today = new Date().toISOString().split('T')[0]
+      if (date === today) return count
+    }
+    return 0
+  })
+
   const [magicHistory, setMagicHistory] = useState([])
-  const MAX_EDITS = 3
 
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
@@ -50,14 +63,22 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
       })
       if (response.data.editedImage) {
         setEditedImage(response.data.editedImage)
-        setEditCount(prev => prev + 1)
+        
+        // Update persistent quota
+        const newCount = editCount + 1
+        setEditCount(newCount)
+        localStorage.setItem('magic_edit_quota', JSON.stringify({
+          date: new Date().toISOString().split('T')[0],
+          count: newCount
+        }))
+
         // Add success message to history
-        setMagicHistory(prev => [...prev, { role: 'ai', text: "Image generated successfully.", image: response.data.editedImage }])
+        setMagicHistory(prev => [...prev, { role: 'ai', text: "Image generated successfully.", image: response.data.editedImage, timestamp: Date.now() }])
       } else {
-        setMagicHistory(prev => [...prev, { role: 'ai', text: response.data.reply }])
+        setMagicHistory(prev => [...prev, { role: 'ai', text: response.data.reply, timestamp: Date.now() }])
       }
     } catch (e) {
-      setMagicHistory(prev => [...prev, { role: 'ai', text: "Edit failed. Please try again." }])
+      setMagicHistory(prev => [...prev, { role: 'ai', text: "Edit failed. Please try again.", timestamp: Date.now() }])
     } finally {
       setIsGeneratingEdit(false)
       setEditPrompt('') // Clear input
@@ -87,7 +108,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
     setChatInput('')
     setIsChatting(true)
 
-    setChatMessages(prev => [...prev, { type: 'user', content: userMessage }])
+    setChatMessages(prev => [...prev, { id: Date.now(), type: 'user', content: userMessage }])
     
     // Format history for Gemini
     const history = chatMessages.map(msg => ({
@@ -104,9 +125,12 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
         analysisContext: result
       })
 
-      setChatMessages(prev => [...prev, { type: 'assistant', content: response.data.reply }])
+      setChatMessages(prev => [...prev, { id: Date.now(), type: 'assistant', content: response.data.reply }])
     } catch (error) {
-      setChatMessages(prev => [...prev, { type: 'error', content: 'Connection lost. Try again.' }])
+      // no-dd-sa:javascript-best-practices/no-console
+      console.error('Chat Error:', error);
+      const errorMessage = error.response?.data?.message || 'Connection lost. Try again.';
+      setChatMessages(prev => [...prev, { id: Date.now(), type: 'error', content: errorMessage }])
     } finally {
       setIsChatting(false)
     }
@@ -204,7 +228,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
         </div>
 
         {/* RIGHT: HUD Panel */}
-        <div className="lg:col-span-4 flex flex-col gap-6 h-full">
+        <div className="lg:col-span-4 flex flex-col gap-6 lg:h-[calc(100vh-8rem)] lg:sticky lg:top-24">
           
           {/* Score Card */}
           <motion.div 
@@ -276,19 +300,43 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    key={i} 
+                    key={msg.id || i} 
                     className={cn("flex", msg.type === 'user' ? 'justify-end' : 'justify-start')}
                   >
                      <div className={cn(
-                       "max-w-[85%] rounded-2xl p-3 text-sm shadow-sm",
+                       "max-w-[85%] rounded-2xl p-3 text-sm shadow-sm break-words",
                        msg.type === 'user' 
                          ? "bg-indigo-600 text-white rounded-tr-sm" 
                          : "bg-zinc-800 text-zinc-200 border border-white/5 rounded-tl-sm"
-                     )}>
-                        {msg.content}
+                     )}
+                     style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                     >
+                        {msg.type === 'assistant' ? (
+                          <div className="prose prose-invert prose-sm max-w-none prose-p:my-2 prose-p:leading-relaxed prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:my-2 prose-strong:text-white prose-a:text-indigo-400">
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          msg.content
+                        )}
                      </div>
                   </motion.div>
                 ))}
+                
+                {/* Chat Loading Animation */}
+                {isChatting && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex justify-start"
+                  >
+                    <div className="bg-zinc-800 rounded-2xl rounded-tl-sm p-4 border border-white/5 flex items-center gap-2">
+                      <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </motion.div>
+                )}
+
                 <div ref={messagesEndRef} />
              </div>
 
@@ -333,7 +381,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                    <div className="space-y-3">
                       <button 
                          onClick={() => {
-                           const text = `I got a ${result.score}/100 on Director's Eye! 🎬\nAI Cinematography Analysis powered by Gemini & Datadog.\n\n#DirectorsEye #Hackathon2025`;
+                           const text = `I got a ${result.score}/100 on Director's Eye! 🎬\nAI Cinematography Analysis \n`;
                            const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
                            window.open(url, '_blank');
                          }}
@@ -359,8 +407,9 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                          onClick={() => {
                             const text = `Director's Eye Analysis:\nScore: ${result.score}/100\nVerdict: ${result.score > 80 ? 'Masterpiece' : 'Standard'}\n#Hackathon2025`;
                             navigator.clipboard.writeText(text);
+                            setCopiedSummary(true);
+                            setTimeout(() => setCopiedSummary(false), 2000);
                             setIsSharing(false);
-                            alert("Summary copied to clipboard!");
                          }}
                          className="w-full flex items-center justify-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 text-white transition-colors font-medium border border-white/10"
                       >
@@ -444,7 +493,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
 
                             {/* Horizontal Suggestions */}
                             <div className="flex gap-2">
-                                {["Cyberpunk Neon", "Golden Hour", "B&W Film Noir", "Ghibli Style", "Moody Fog", "80s Retro"].map((suggestion) => (
+                                {["Cyberpunk Neon", "Golden Hour", "B&W Film Noir", "Art pencil style", "Moody Fog", "80s Retro"].map((suggestion) => (
                                     <button 
                                       key={suggestion}
                                       onClick={() => setEditPrompt(suggestion)}
@@ -463,12 +512,12 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                                    <Sparkles className="w-12 h-12 text-zinc-600" />
                                    <p className="text-zinc-400 text-sm max-w-xs">
                                      Select a suggestion above or describe your vision below. <br/>
-                                     <span className="text-xs text-zinc-600">(Max {MAX_EDITS} edits per photo)</span>
+                                     <span className="text-xs text-zinc-600">(Batas {MAX_EDITS} edit per hari)</span>
                                    </p>
                                </div>
                            ) : (
-                               magicHistory.map((msg, i) => (
-                                   <div key={i} className={cn("flex w-full", msg.role === 'user' ? "justify-end" : "justify-start")}>
+                               magicHistory.map((msg) => (
+                                   <div key={msg.timestamp} className={cn("flex w-full", msg.role === 'user' ? "justify-end" : "justify-start")}>
                                        <div className={cn(
                                            "max-w-[80%] rounded-2xl p-4 text-sm",
                                            msg.role === 'user' 
@@ -504,33 +553,39 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                 {/* Input Footer - Sticky */}
                 <div className="p-4 md:p-6 bg-zinc-900 border-t border-white/10 shrink-0 mb-safe-area">
                    {!editedImage ? (
-                     <div className="flex gap-3">
+                     <div className="flex flex-col gap-3">
                         {editCount >= MAX_EDITS ? (
-                            <div className="flex-1 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-4 text-red-200 text-center text-sm font-medium flex items-center justify-center gap-2">
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-4 text-red-200 text-center text-sm font-medium flex items-center justify-center gap-2">
                                 <Info className="w-4 h-4" />
-                                Edit limit reached ({MAX_EDITS}/{MAX_EDITS}). Upload a new photo to continue.
+                                Daily limit reached ({MAX_EDITS}/{MAX_EDITS}). Try again tomorrow or upload a new photo.
                             </div>
                         ) : (
                             <>
-                                <input 
-                                  type="text" 
-                                  value={editPrompt}
-                                  onChange={e => setEditPrompt(e.target.value)}
-                                  placeholder={isGeneratingEdit ? "AI is thinking..." : `Describe your edit (Attempt ${editCount + 1}/${MAX_EDITS})...`}
-                                  className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-white focus:outline-none focus:border-indigo-500 transition-all font-mono text-sm placeholder:text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={isGeneratingEdit}
-                                  onKeyDown={e => e.key === 'Enter' && handleMagicEdit()}
-                                  autoFocus
-                                />
-                                <button 
-                                  onClick={handleMagicEdit}
-                                  disabled={isGeneratingEdit || !editPrompt.trim()}
-                                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-6 md:px-8 rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-600/20 whitespace-nowrap"
-                                >
-                                   {isGeneratingEdit ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                                   <span className="hidden md:inline">{isGeneratingEdit ? 'Remixing...' : 'Generate'}</span>
-                                   <span className="md:hidden">{isGeneratingEdit ? '...' : 'Go'}</span>
-                                </button>
+                                <div className="flex justify-between items-center px-1">
+                                    <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">PROMPT_INPUT_LAYER</span>
+                                    <span className="text-[10px] text-indigo-400 font-mono font-bold">DAILY QUOTA: {MAX_EDITS - editCount}/{MAX_EDITS}</span>
+                                </div>
+                                <div className="flex gap-3">
+                                    <input 
+                                      type="text" 
+                                      value={editPrompt}
+                                      onChange={e => setEditPrompt(e.target.value)}
+                                      placeholder={isGeneratingEdit ? "AI is thinking..." : "Describe visual changes..."}
+                                      className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-white focus:outline-none focus:border-indigo-500 transition-all font-mono text-sm placeholder:text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      disabled={isGeneratingEdit}
+                                      onKeyDown={e => e.key === 'Enter' && handleMagicEdit()}
+                                      autoFocus
+                                    />
+                                    <button 
+                                      onClick={handleMagicEdit}
+                                      disabled={isGeneratingEdit || !editPrompt.trim()}
+                                      className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-6 md:px-8 rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-600/20 whitespace-nowrap"
+                                    >
+                                       {isGeneratingEdit ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                                       <span className="hidden md:inline">{isGeneratingEdit ? 'Remixing...' : 'Generate'}</span>
+                                       <span className="md:hidden">{isGeneratingEdit ? '...' : 'Go'}</span>
+                                    </button>
+                                </div>
                             </>
                         )}
                      </div>
@@ -560,6 +615,21 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                 </div>
              </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      
+      {/* Notifications / Toasts */}
+      <AnimatePresence>
+        {copiedSummary && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] bg-indigo-600 text-white px-6 py-3 rounded-full shadow-2xl font-bold flex items-center gap-2 border border-white/20"
+          >
+            <Check className="w-5 h-5" />
+            Summary copied to clipboard!
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

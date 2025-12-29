@@ -1,0 +1,27 @@
+{
+	"id": 17316814,
+	"name": "[Business Logic] Low Cinematography Score (<50)",
+	"type": "metric alert",
+	"query": "avg(last_5m):avg:app.cinematography.score{service:directors-eye-backend} < 50",
+	"message": "Average cinematography score dropped below 50. Possible model hallucination or poor input quality.\n\n@team-lead",
+	"tags": [
+		"env:production",
+		"service:directors-eye-backend",
+		"quality"
+	],
+	"options": {
+		"thresholds": {
+			"critical": 50,
+			"warning": 60
+		},
+		"notify_no_data": false,
+		"notify_audit": false,
+		"new_host_delay": 300,
+		"include_tags": true,
+		"escalation_message": "Quality scores still low. Check AI prompt and input quality.",
+		"renotify_interval": 60,
+		"runbook_url": "https://github.com/madaldho/Directors-Eye/blob/main/docs/TROUBLESHOOTING.md#-low-cinematography-score-50"
+	},
+	"priority": null,
+	"draft_status": "published"
+}

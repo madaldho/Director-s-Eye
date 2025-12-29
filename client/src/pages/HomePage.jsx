@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { datadogRum } from '@datadog/browser-rum'
@@ -16,20 +16,19 @@ import { SAMPLE_ANALYSIS } from '../data/sampleAnalysis'
 
 const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
   const [isUploading, setIsUploading] = useState(false)
-  const [demoMode, setDemoMode] = useState(true)
+
   const navigate = useNavigate()
 
   const onDrop = useCallback(async (acceptedFiles) => {
     const file = acceptedFiles[0]
     if (!file) return
     setIsUploading(true)
-    datadogRum.addAction('image_upload_started', { fileSize: file.size, demoMode })
+    datadogRum.addAction('image_upload_started', { fileSize: file.size })
     onTelemetryLog({ type: 'info', message: `Uploading ${file.name}` })
 
     try {
       const formData = new FormData()
       formData.append('image', file)
-      formData.append('demoMode', demoMode.toString())
 
       const response = await axios.post('/api/analyze', formData)
       
@@ -45,11 +44,35 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
     } finally {
       setIsUploading(false)
     }
-  }, [demoMode, navigate, onAnalysisComplete, onTelemetryLog])
+  }, [navigate, onAnalysisComplete, onTelemetryLog])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop, accept: { 'image/*': ['.jpeg', '.png'] }, maxFiles: 1, disabled: isUploading
   })
+
+  // Loading State Logic
+  const [loadingText, setLoadingText] = useState('Initializing Director...')
+  
+  useEffect(() => {
+    let interval
+    if (isUploading) {
+      const phrases = [
+        "Calibrating visual sensors...",
+        "Analyzing lighting ratios...", 
+        "Deconstructing composition...",
+        "Measuring color harmony...",
+        "Consulting the archives...",
+        "Finalizing director's score..."
+      ]
+      let i = 0
+      setLoadingText(phrases[0])
+      interval = setInterval(() => {
+        i = (i + 1) % phrases.length
+        setLoadingText(phrases[i])
+      }, 800)
+    }
+    return () => clearInterval(interval)
+  }, [isUploading])
 
   return (
     <div className="min-h-screen pt-24 pb-12 px-6 max-w-7xl mx-auto flex flex-col justify-center">
@@ -57,16 +80,18 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
       {/* Header */}
       <div className="text-center mb-12 fade-in">
         <span className="inline-block py-1 px-3 rounded-full bg-[var(--bento-card)] border border-[var(--bento-border)] text-xs font-medium text-[var(--bento-accent)] mb-4">
-          v2.0 Hackathon Edition
+          Best Cinematography Analysis
         </span>
         <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-4 text-white font-display">
           Director's <span className="text-[var(--bento-accent)]">Eye</span>
         </h1>
         <p className="text-lg text-[var(--bento-muted)] max-w-2xl mx-auto">
-          Professional cinematography analysis powered by <span className="text-white font-medium">Gemini 2.0 Flash</span>. 
+          Professional cinematography analysis powered by <span className="text-white font-medium">AI</span>. 
           Instant grading on lighting, composition, and mood.
         </p>
       </div>
+
+
 
       {/* 1. Main Upload Section (Top) */}
       <motion.div 
@@ -87,28 +112,6 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
           {/* Background Gradient */}
           <div className="absolute inset-0 bg-gradient-to-tr from-[var(--bento-accent)]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
-          {/* Simulation Mode Toggle (Top Right of Upload Card) */}
-          <div 
-            className="absolute top-4 right-4 z-20 flex items-center gap-3 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/5 hover:border-white/20 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              setDemoMode(!demoMode);
-            }}
-          >
-             <span className="text-xs font-medium text-[var(--bento-muted)] px-2">
-               {demoMode ? 'Simulation ON' : 'Simulation OFF'}
-             </span>
-             <div className={cn(
-                "w-10 h-5 rounded-full p-1 transition-colors flex items-center",
-                demoMode ? "bg-[var(--bento-accent)]" : "bg-zinc-700"
-             )}>
-                <div className={cn(
-                  "w-3 h-3 rounded-full bg-white transition-transform shadow-sm",
-                  demoMode ? "translate-x-5" : "translate-x-0"
-                )} />
-             </div>
-          </div>
-
           <div className="relative z-10 flex flex-col items-center">
             <div className="w-20 h-20 rounded-2xl bg-[var(--bento-accent)] flex items-center justify-center mb-6 shadow-xl shadow-[var(--bento-accent)]/20 group-hover:scale-110 transition-transform duration-300">
               {isUploading ? (
@@ -117,11 +120,15 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
                 <Upload className="w-10 h-10 text-white" />
               )}
             </div>
-            <h3 className="text-3xl font-bold text-white mb-2 font-display">
-              {isUploading ? 'Analyzing Footage...' : 'Drop Footage Here'}
+            <h3 className="text-3xl font-bold text-white mb-2 font-display min-h-[40px] flex items-center">
+              {isUploading ? (
+                <span className="animate-pulse">{loadingText}</span>
+              ) : (
+                'Drop Footage Here'
+              )}
             </h3>
             <p className="text-[var(--bento-muted)] mb-8">
-              {isUploading ? 'Gemini 2.0 is processing grading...' : 'Support JPG, PNG up to 10MB'}
+              {isUploading ? 'Gemini 2.5 Flash Lite is thinking...' : 'Support JPG, PNG up to 10MB'}
             </p>
             
             {!isUploading && (
@@ -138,7 +145,7 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
         <div className="flex items-center gap-4 mb-8">
            <div className="h-px flex-1 bg-[var(--bento-border)]" />
            <span className="text-xs font-semibold text-[var(--bento-muted)] uppercase tracking-widest">
-             Or Try Instant Analysis (Zero Token)
+             Or Try Instant Analysis 
            </span>
            <div className="h-px flex-1 bg-[var(--bento-border)]" />
         </div>
@@ -212,7 +219,7 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
               <Zap className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white mb-1">Gemini 2.0 Flash</h3>
+              <h3 className="text-lg font-bold text-white mb-1">Gemini AI</h3>
               <p className="text-xs text-[var(--bento-muted)]">Sub-second multimodal cinematography grading</p>
             </div>
           </motion.div>

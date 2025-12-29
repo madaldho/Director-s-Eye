@@ -12,7 +12,8 @@ import base64
 from pathlib import Path
 
 # Configuration
-API_BASE_URL = "http://localhost:5000/api"
+API_BASE_URL = "http://directorseye.xyz/api"
+# API_BASE_URL = "http://localhost:4567/api" # Local fallback
 DEMO_IMAGES = [
     "https://images.unsplash.com/photo-1506905925346-21bda4d32df4",  # Landscape
     "https://images.unsplash.com/photo-1441974231531-c6227db76b6e",  # Forest
