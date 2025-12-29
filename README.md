@@ -31,7 +31,7 @@ Built with a focus on **Visual Experience** and **System Reliability**, Director
 
 ### Backend
 *   **Node.js & Express**: Serverless-ready backend architecture.
-*   **Google Gemini 2.5 Flash Lite**: Multimodal AI for sub-second image analysis.
+*   **Google Gemini **: Multimodal AI for sub-second image analysis.
 *   **Datadog APM**: Distributed tracing and backend performance monitoring.
 
 ---
