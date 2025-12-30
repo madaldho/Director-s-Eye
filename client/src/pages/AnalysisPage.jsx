@@ -53,6 +53,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const [editPrompt, setEditPrompt] = useState('')
   const [isGeneratingEdit, setIsGeneratingEdit] = useState(false)
   const [editedImage, setEditedImage] = useState(null)
+  const [lastUsedPrompt, setLastUsedPrompt] = useState('') // Store the prompt used for current edited image
   
   // Model configurations - must match Navbar
   const MODEL_CONFIG = {
@@ -163,6 +164,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
       
       if (response.data.editedImage) {
         setEditedImage(response.data.editedImage)
+        setLastUsedPrompt(editPrompt) // Save the prompt used for this edit
         
         // Refresh quota from server (server tracks by IP)
         await fetchQuota()
@@ -818,13 +820,16 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                    ) : (
                      <div className="flex gap-3 justify-end flex-wrap">
                         <button 
-                           onClick={() => setEditedImage(null)}
+                           onClick={() => {
+                             setEditedImage(null)
+                             setLastUsedPrompt('')
+                           }}
                            className="px-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-white font-medium transition-colors"
                         >
                           Try Another Edit
                         </button>
                         <button 
-                           onClick={() => handleShareToGallery(editedImage, editPrompt || 'Magic Edit', true)}
+                           onClick={() => handleShareToGallery(editedImage, lastUsedPrompt || editPrompt, true)}
                            className="px-6 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold shadow-lg shadow-green-600/20 flex items-center gap-2"
                         >
                           <Globe className="w-4 h-4" />
