@@ -1,9 +1,7 @@
 {
   "version": 2,
-  "framework": "vite",
-  "buildCommand": "npm run build",
+  "buildCommand": "npm install --prefix client && npm install --prefix server && cd client && npx vite build",
   "outputDirectory": "client/dist",
-  "installCommand": "npm install && npm install --prefix server && npm install --prefix client",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
   ]
