@@ -5,7 +5,6 @@
   "installCommand": "npm install && cd server && npm install && cd ../client && npm install",
   "functions": {
     "api/index.js": {
-      "runtime": "@vercel/node@3",
       "maxDuration": 60,
       "includeFiles": "server/**"
     }
