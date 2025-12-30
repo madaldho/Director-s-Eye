@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:llmobs": "node -r dd-trace/init index.js"
   },
   "dependencies": {
     "@google-cloud/vertexai": "^1.10.0",
@@ -13,9 +14,10 @@
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.13.2",
     "cors": "^2.8.5",
-    "dd-trace": "^4.22.0",
+    "dd-trace": "^5.81.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "firebase-admin": "^13.6.0",
     "helmet": "^7.2.0",
     "multer": "^1.4.5-lts.1",
     "winston": "^3.11.0"

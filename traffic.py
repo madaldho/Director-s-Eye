@@ -1,166 +1,109 @@
-#!/usr/bin/env python3
-"""
-Traffic Generator for Director's Eye - Datadog Hackathon Demo
-Generates realistic traffic patterns to showcase Datadog monitoring
-"""
-
+import requests
 import time
 import random
-import requests
-import json
-import base64
-from pathlib import Path
+import sys
+import threading
 
 # Configuration
-API_BASE_URL = "http://directorseye.xyz/api"
-# API_BASE_URL = "http://localhost:4567/api" # Local fallback
-DEMO_IMAGES = [
-    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4",  # Landscape
-    "https://images.unsplash.com/photo-1441974231531-c6227db76b6e",  # Forest
-    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4",  # Portrait
-]
+BASE_URL = "http://localhost:4567"
+ENDPOINTS = {
+    "health": "/api/health",
+    "analyze": "/api/analyze",
+    "chat": "/api/chat",
+    "gallery": "/api/gallery"
+}
 
-def generate_dummy_image_data():
-    """Generate dummy base64 image data for testing"""
-    # This is a minimal 1x1 pixel PNG in base64
-    return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+# Sample payloads
+SAMPLE_CHAT = {
+    "message": "How is the lighting in this shot?",
+    "history": [],
+    "imageContext": None,
+    "analysisContext": None
+}
 
-def simulate_analysis_request():
-    """Simulate an image analysis request"""
+# Image simulation (base64 placeholder)
+SAMPLE_IMAGE_B64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAAAAAAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAQECAQECAgICAgICAgMFAwMDAwMGBAQDBQcHBwcHBwcHBwoLCAcHCQcHBwkMCgwMDAwMDAcJDg4MDAwMDAwM/9oADAMBAAIRAxEAPwD9/KKKKAP/2Q=="
+
+def log(msg, type="INFO"):
+    timestamp = time.strftime("%H:%M:%S")
+    print(f"[{timestamp}] [{type}] {msg}")
+
+def run_health_check():
     try:
-        # Use demo mode for consistent results
-        payload = {
-            "image": f"data:image/png;base64,{generate_dummy_image_data()}",
-            "demoMode": "true"
-        }
-        
-        print(f"🎬 Sending analysis request...")
-        response = requests.post(f"{API_BASE_URL}/analyze", json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            result = response.json()
-            print(f"✅ Analysis complete - Score: {result['score']}/100")
-            return True
+        start = time.time()
+        resp = requests.get(f"{BASE_URL}{ENDPOINTS['health']}")
+        duration = (time.time() - start) * 1000
+        if resp.status_code == 200:
+            log(f"Health Check OK ({duration:.0f}ms)")
         else:
-            print(f"❌ Analysis failed - Status: {response.status_code}")
-            return False
-            
-    except requests.exceptions.RequestException as e:
-        print(f"🔥 Request failed: {e}")
-        return False
+            log(f"Health Check Failed: {resp.status_code}", "ERROR")
+    except Exception as e:
+        log(f"Health Check Connection Failed: {e}", "CRITICAL")
 
-def simulate_chat_request():
-    """Simulate a chat request"""
+def run_chat_simulation():
     try:
-        questions = [
-            "How can I improve the lighting in this shot?",
-            "What camera settings would you recommend?",
-            "Is the composition following the rule of thirds?",
-            "How would you describe the mood of this image?",
-            "What genre does this cinematography style represent?"
-        ]
-        
-        payload = {
-            "message": random.choice(questions),
-            "imageContext": generate_dummy_image_data()
-        }
-        
-        print(f"💬 Sending chat request...")
-        response = requests.post(f"{API_BASE_URL}/chat", json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            print(f"✅ Chat response received")
-            return True
+        start = time.time()
+        # 10% chance to simulate a bad request (400)
+        if random.random() < 0.1:
+            resp = requests.post(f"{BASE_URL}{ENDPOINTS['chat']}", json={}) # Empty body
+            log(f"Simulated Bad Chat Request: {resp.status_code}", "WARN")
         else:
-            print(f"❌ Chat failed - Status: {response.status_code}")
-            return False
-            
-    except requests.exceptions.RequestException as e:
-        print(f"🔥 Chat request failed: {e}")
-        return False
+            resp = requests.post(f"{BASE_URL}{ENDPOINTS['chat']}", json=SAMPLE_CHAT)
+            duration = (time.time() - start) * 1000
+            if resp.status_code == 200:
+                log(f"Chat Response OK ({duration:.0f}ms)")
+            else:
+                log(f"Chat Logic Error: {resp.status_code}", "ERROR")
+    except Exception as e:
+        log(f"Chat Connection Failed: {e}", "CRITICAL")
 
-def simulate_error():
-    """Trigger the simulate error endpoint"""
+def run_analysis_simulation():
     try:
-        print(f"💥 Triggering simulated error...")
-        response = requests.post(f"{API_BASE_URL}/simulate-error", timeout=5)
-        print(f"🚨 Error simulation complete - Status: {response.status_code}")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"🔥 Error simulation failed: {e}")
-        return False
-
-def check_health():
-    """Check API health"""
-    try:
-        response = requests.get(f"{API_BASE_URL}/health", timeout=5)
-        if response.status_code == 200:
-            print(f"💚 System healthy")
-            return True
+        # 5% chance to simulate Server Error (500) - Useful for Error Rate Monitor
+        if random.random() < 0.05:
+            # We assume the server handles malformed image data gracefully, 
+            # so to trigger a 500 we might need to rely on the server's error injection or just bad data
+            resp = requests.post(f"{BASE_URL}{ENDPOINTS['analyze']}", json={"image": "invalid-garbage"})
+            log(f"Simulated Analysis 500 Attempt: {resp.status_code}", "WARN")
         else:
-            print(f"💔 System unhealthy - Status: {response.status_code}")
-            return False
-    except requests.exceptions.RequestException as e:
-        print(f"🔥 Health check failed: {e}")
-        return False
+            # Normal request
+            resp = requests.post(f"{BASE_URL}{ENDPOINTS['analyze']}", json={"image": SAMPLE_IMAGE_B64})
+            if resp.status_code == 200:
+                log(f"Image Analysis OK")
+            else:
+                log(f"Image Analysis Failed: {resp.status_code}", "ERROR")
+    except Exception as e:
+        log(f"Analysis Connection Failed: {e}", "CRITICAL")
 
 def main():
-    """Main traffic generation loop"""
-    print("🚀 Starting Director's Eye Traffic Generator")
-    print("📊 This will generate realistic traffic for Datadog monitoring")
-    print("🎯 Perfect for demo videos and dashboard screenshots")
-    print("-" * 60)
-    
-    # Check if API is available
-    if not check_health():
-        print("❌ API not available. Make sure the backend is running on localhost:5000")
-        return
-    
-    request_count = 0
-    error_count = 0
-    
+    print("🚦 Director's Eye Traffic Generator Started")
+    print("   Generating traffic to: " + BASE_URL)
+    print("   Press Ctrl+C to stop.")
+    print("------------------------------------------")
+
     try:
         while True:
-            request_count += 1
+            # Randomly pick an action
+            action = random.choice(['health', 'chat', 'analyze', 'gallery'])
             
-            # Simulate different traffic patterns
-            action = random.choices(
-                ['analysis', 'chat', 'health', 'error'],
-                weights=[60, 25, 10, 5],  # Weighted probabilities
-                k=1
-            )[0]
-            
-            print(f"\n[Request #{request_count}] Action: {action}")
-            
-            success = False
-            if action == 'analysis':
-                success = simulate_analysis_request()
+            if action == 'health':
+                run_health_check()
             elif action == 'chat':
-                success = simulate_chat_request()
-            elif action == 'health':
-                success = check_health()
-            elif action == 'error':
-                success = simulate_error()
-                if success:
-                    error_count += 1
-            
-            if not success:
-                error_count += 1
-            
-            # Print stats every 10 requests
-            if request_count % 10 == 0:
-                success_rate = ((request_count - error_count) / request_count) * 100
-                print(f"\n📈 Stats: {request_count} requests, {success_rate:.1f}% success rate")
-            
-            # Random delay between requests (1-5 seconds)
-            delay = random.uniform(1, 5)
-            print(f"⏱️  Waiting {delay:.1f}s...")
-            time.sleep(delay)
-            
+                run_chat_simulation()
+            elif action == 'analyze':
+                run_analysis_simulation()
+            elif action == 'gallery':
+                try:
+                    requests.get(f"{BASE_URL}{ENDPOINTS['gallery']}")
+                    log("Gallery Feed Checked")
+                except:
+                    pass
+
+            # Random sleep between 0.5s and 3s
+            time.sleep(random.uniform(0.5, 3.0))
+
     except KeyboardInterrupt:
-        print(f"\n\n🛑 Traffic generation stopped")
-        print(f"📊 Final stats: {request_count} requests, {error_count} errors")
-        print("🎬 Check your Datadog dashboard for the generated metrics!")
+        print("\n🛑 Traffic Generator Stopped")
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /gallery/{document=**} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true; // Allow updates for making items public
+      allow delete: if false;
+    }
+  }
+}

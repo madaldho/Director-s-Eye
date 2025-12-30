@@ -1,9 +1,5 @@
 {
   "version": 2,
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/server/index.js" },
-    { "source": "/(.*)", "destination": "/client/$1" }
-  ],
   "builds": [
     {
       "src": "server/index.js",
@@ -12,7 +8,17 @@
     {
       "src": "client/package.json",
       "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
+      "config": { 
+        "distDir": "dist"
+      }
     }
-  ]
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/server/index.js" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/client/dist/$1" }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
 }

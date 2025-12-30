@@ -7,47 +7,58 @@
 Built with a focus on **Visual Experience** and **System Reliability**, Director's Eye bridges the gap between creative intuition and engineering precision.
 
 
+
 ## ✨ Key Features
 
 ### 🎨 For Creatives (The Vibe)
-*   **The Director Persona**: Chat with an AI that has opinions, style, and deep cinematic knowledge. 
+*   **The Director Persona**: Chat with an AI that has opinions, style, and deep cinematic knowledge.
 *   **Premium Aesthetic**: A dark-themed, glassmorphic interface designed for creative immersion with smooth animations.
-*   **Instant Insight**: Magic Edit suggestions that visualize potential improvements instantly using Generative AI.
-*   **Cinematography Scoring**: Get an objective "Quality Score" for every image based on professional visual criteria.
+*   **Magic Edit**: AI-powered image remixing that transforms your photos with text prompts using AI generative capabilities.
+*   **Cinematography Scoring**: Get an objective "Quality Score" (1-100) for every image based on professional visual criteria.
+*   **Community Gallery**: Share your creations publicly or keep a private history of all analyses.
+*   **Custom API Key**: Bring your own Gemini API key for unlimited usage.
 
 ### ⚙️ For Engineers (The Tech)
 *   **End-to-End Observability**: Full distributed tracing (`dd-trace`) from the React frontend to the Node.js backend and Gemini AI service.
-*   **LLM Monitoring**: Tracks Token Usage, Cost, and Hallucinations for every AI inference.
-*   **Custom Business Metrics**: Real-time tracking of `app.quality_score` and user engagement via DogStatsD.
-*   **Reliability First**: Alerting pipelines for high error rates and latency spikes.
+*   **LLM Observability**: Automatic instrumentation of Google GenAI calls with token tracking, cost estimation, and response quality monitoring.
+*   **Security Detection**: Real-time prompt injection detection with alerting to Datadog.
+*   **Custom Business Metrics**: Real-time tracking of `app.cinematography.score`, `app.ai.tokens.total`, `app.ai.cost.estimated` via Datadog API.
+*   **Reliability First**: 6 detection rules for errors, latency, quality degradation, security threats, cost anomalies, and abuse patterns.
 
 ## 🛠️ Technologies Used
 
 ### Frontend
 *   **React (Vite)**: For a blazing fast UI.
 *   **Tailwind CSS**: For custom, premium styling.
-*   **Framer Motion**: For fluid UI transitions.
 *   **Datadog RUM**: For real user monitoring and session replay.
 
 ### Backend
 *   **Node.js & Express**: Serverless-ready backend architecture.
-*   **Google Gemini **: Multimodal AI for sub-second image analysis.
+*   **Google Gemini AI**: Gemini for image analysis, for chat.
+*   **Firebase Firestore**: For persistent storage of gallery and history.
+*   **dd-trace**: For LLM Observability with automatic Google GenAI instrumentation.
 *   **Datadog APM**: Distributed tracing and backend performance monitoring.
 
 ---
 
-### Observability Strategy
+## 📊 Observability Strategy
+
 | Signal Type | Implementation |
 |:---|:---|
 | **APM Tracing** | `dd-trace` auto-instrumentation + custom spans for AI calls |
-| **Custom Metrics** | Token usage, cost estimation, cinematography scores |
+| **LLM Observability** | Automatic Google GenAI tracing (dd-trace v5.81+) |
+| **Custom Metrics** | Token usage, cost estimation, cinematography scores, latency |
+| **Security Signals** | Prompt injection detection with real-time alerting |
 | **RUM** | Session tracking, replay, user interactions |
-| **Browser Logs** | Error forwarding to Datadog Logs |
+| **Logs** | Winston logs forwarded to Datadog Logs |
 
-### Detection Rules (3 Monitors)
+### Detection Rules (6 Monitors)
 1. **[High Error Rate](./monitor_error_rate.json)** - Triggers when errors exceed 1%
 2. **[High Latency](./monitor_latency.json)** - Triggers when response time exceeds 5 seconds
 3. **[Low Quality Score](./monitor_quality_score.json)** - Triggers when AI score drops below 50
+4. **Token Anomaly** - Detects unusual spikes in token consumption
+5. **Prompt Injection** - Security alert for injection attempts
+6. **Cost Anomaly** - Alerts when AI spending exceeds threshold
 
 ### SLO
 - **Name**: Director's Eye - API Response Time SLO
@@ -58,14 +69,14 @@ Built with a focus on **Visual Experience** and **System Reliability**, Director
 ### Incident Management
 Automated incident creation via API when monitors trigger. See [scripts/create-incident.js](./scripts/create-incident.js).
 
-
 ### Exported Configurations
 All Datadog configurations exported as JSON:
-- `datadog_dashboard.json` - Main observability dashboard
+- `datadog_dashboard.json` - Main LLM observability dashboard
 - `monitor_error_rate.json` - Error rate monitor
 - `monitor_latency.json` - Latency monitor  
 - `monitor_quality_score.json` - Quality score monitor
 - `slo_created.json` - SLO definition
+- `slo_latency.json` - Latency SLO
 
 ---
 
@@ -77,13 +88,14 @@ Follow these instructions to get the project up and running on your local machin
 
 Ensure you have the following installed on your machine:
 *   **Node.js**: v18.0.0 or higher.
-*   **Python**: v3.8 or higher 
-*   **Git**: Latest version. 
+*   **Python**: v3.8 or higher (for traffic generator)
+*   **Git**: Latest version.
 
-### 🔑  API Keys Required
+### 🔑 API Keys Required
 You will need API keys from the following services:
 1.  **Google AI Studio**: Get your API key [here](https://aistudio.google.com/).
-2.  **Datadog**: Create a free account and get your API Key and Client Token [here](https://app.datadoghq.com/).
+2.  **Datadog**: Create a free account and get your API Key, App Key, and Client Token [here](https://app.datadoghq.com/).
+3.  **Firebase** (Optional, for Gallery): Create a project [here](https://console.firebase.google.com/).
 
 ### 💻 Installation
 
@@ -116,11 +128,31 @@ You will need API keys from the following services:
     
     | Variable | Description | Example Value |
     | :--- | :--- | :--- |
-    | `GEMINI_API_KEY` | Your Google Gemini API Key | `AIzaSy...` |
-    | `DD_API_KEY` | Datadog API Key (Backend) | `e1a7...` |
+    | `GOOGLE_API_KEY` | Your Google Gemini API Key | `AIzaSy...` |
+    | `DD_API_KEY` | Datadog API Key | `560b61...` |
+    | `DD_APP_KEY` | Datadog App Key | `e1a67d...` |
     | `DD_SITE` | Datadog Site Region | `us5.datadoghq.com` |
-    | `VITE_DD_CLIENT_TOKEN` | Datadog Client Token (Frontend) | `pub2f...` |
-    | `VITE_DD_APPLICATION_ID` | Datadog RUM App ID | `b3c4...` |
+    | `DD_LLMOBS_ENABLED` | Enable LLM Observability | `1` |
+    | `DD_LLMOBS_ML_APP` | LLM Obs App Name | `director-eye` |
+    | `VITE_DD_CLIENT_TOKEN` | Datadog Client Token (Frontend) | `pub2ff...` |
+    | `VITE_DD_APPLICATION_ID` | Datadog RUM App ID | `fda0f4...` |
+    | `VITE_DD_SITE` | Datadog Site for RUM | `us5.datadoghq.com` |
+
+4.  **Firebase Setup (For Gallery Feature):**
+    ```bash
+    # 1. Create Firebase project at console.firebase.google.com
+    # 2. Enable Firestore Database
+    # 3. Download Service Account JSON from Project Settings > Service Accounts
+    # 4. Save as server/service-account.json
+    # 5. Deploy Firestore indexes:
+    npx firebase-tools deploy --only firestore:indexes
+    ```
+
+5.  **Setup Datadog Monitors:**
+    ```bash
+    node scripts/auto_create_monitors.js
+    node scripts/create-slo.js
+    ```
 
 ### ▶️ Running the Application
 
@@ -169,22 +201,24 @@ VITE ready in XXXms
 
 > **Note**: Make sure Backend is running FIRST before using the Frontend.
 
-## 🚦 Traffic Generator (For Demo & Testing)
+---
 
-To demonstrate the **End-to-End Observability** features (Alerts, Traces, Metrics) without waiting for real users, use the included Python traffic generator.
+### 🚦 Traffic Generator (For Demo & Testing)
 
-### 1. Setup Python Environment
+To demonstrate the **End-to-End Observability** features (Alerts, Traces, Metrics) without waiting for real users, use the included traffic generators.
+
+#### Option 1: Python Version (Recommended for Datadog Challenge)
 ```bash
-# Ensure you are in the root directory
 pip install requests
-```
-
-### 2. Run the Generator
-```bash
 python3 traffic.py
 ```
 
-### 3. What it does?
+#### Option 2: Node.js Version
+```bash
+node scripts/traffic-generator.js
+```
+
+### What it does?
 The script will endlessly loop through these scenarios to populate your Datadog Dashboard:
 *   ✅ **Standard Analysis**: Sends valid images to be analyzed (Success 200 OK).
 *   💬 **Chat Simulation**: Converses with the AI "Director" about lighting and composition.

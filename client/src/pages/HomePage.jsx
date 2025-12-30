@@ -13,6 +13,7 @@ import {
 import axios from 'axios'
 import { cn } from '../lib/utils'
 import { SAMPLE_ANALYSIS } from '../data/sampleAnalysis'
+import GallerySection from '../components/GallerySection'
 
 const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
   const [isUploading, setIsUploading] = useState(false)
@@ -49,6 +50,20 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop, accept: { 'image/*': ['.jpeg', '.png'] }, maxFiles: 1, disabled: isUploading
   })
+
+  // Handle Gallery Remix
+  const handleRemix = (prompt) => {
+     // Store prompt in localStorage to be picked up by AnalysisPage
+     localStorage.setItem('remix_prompt', prompt)
+     // For demo, we might need a dummy image or redirect to upload if no image
+     // But user asked for remix, so let's redirect to upload and show a message
+     // OR better: navigate to analysis with a sample image if none provided? 
+     // Let's scroll to top and highlight upload for now OR allow text-only start?
+     // Actually, Magic Edit needs an image. So we should scroll to top.
+     window.scrollTo({ top: 0, behavior: 'smooth' })
+     alert("Remix mode: Upload an image to apply this style!")
+     // In a real app we might pass the style to the analysis/edit phase
+  }
 
   // Loading State Logic
   const [loadingText, setLoadingText] = useState('Initializing Director...')
@@ -224,6 +239,9 @@ const HomePage = ({ onAnalysisComplete, onTelemetryLog }) => {
             </div>
           </motion.div>
       </div>
+
+      {/* 4. Community Gallery */}
+      <GallerySection onRemix={handleRemix} />
 
       <div className="mt-12 text-center pb-8 opacity-40 hover:opacity-100 transition-opacity">
          <p className="text-xs text-[var(--bento-muted)] font-mono">

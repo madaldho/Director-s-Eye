@@ -1,16 +1,27 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') }); // Load env vars from ROOT
+
 // CRITICAL: Datadog Tracer MUST be initialized first (after env)
 const tracer = require('dd-trace').init({
   logInjection: true,
   service: 'directors-eye-backend',
   env: 'production',
-  version: 'v1.0'
+  version: 'v1.0',
+  // LLM Observability - auto-instruments Google GenAI
+  llmobs: {
+    mlApp: 'director-eye',
+    agentlessEnabled: true // Send directly to Datadog API without Agent
+  }
 });
+
+// Access llmobs for manual annotations if needed
+const { llmobs } = tracer;
 
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const admin = require('firebase-admin');
+const { db } = require('./firebase');
 const multer = require('multer');
 const winston = require('winston');
 const axios = require('axios'); // Moved to top - used in DatadogTransport
@@ -19,60 +30,9 @@ const { GoogleGenAI } = require('@google/genai');
 const app = express();
 const PORT = process.env.PORT || 4567;
 
-// --- HTTP LOG SUBMISSION HELPER ---
-const Transport = require('winston-transport');
-class DatadogTransport extends Transport {
-  constructor(opts) {
-    super(opts);
-  }
+const logger = require('./logger');
 
-  log(info, callback) {
-    setImmediate(() => {
-      this.emit('logged', info);
-    });
-
-    if (!process.env.DD_API_KEY) {
-      callback();
-      return;
-    }
-
-    // Map Winston levels to Datadog status
-    const levelMap = { error: 'error', warn: 'warn', info: 'info', debug: 'debug' };
-    const status = levelMap[info.level] || 'info';
-
-    axios.post(
-      'https://http-intake.logs.us5.datadoghq.com/api/v2/logs',
-      [{
-        ddsource: 'nodejs',
-        ddtags: 'env:production,service:directors-eye-backend',
-        hostname: 'macbook-pro-user',
-        message: info.message,
-        service: 'directors-eye-backend',
-        status: status,
-        ...info
-      }],
-      { headers: { 'DD-API-KEY': process.env.DD_API_KEY } }
-    ).catch(e => {
-      // Silent fail - don't break app if Datadog log submission fails
-    });
-
-    callback();
-  }
-}
-
-// Winston Logger Setup
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: 'app.log' }),
-    new DatadogTransport()
-  ]
-});
+// Security & Middleware (Logger is now imported)
 
 // Security & Middleware
 app.use(helmet()); // Security headers
@@ -139,6 +99,212 @@ app.get('/api/health', (req, res) => {
     aiStatus: genAI ? 'connected' : 'demo-only',
     timestamp: new Date().toISOString()
   });
+});
+
+// Validate Custom API Key
+app.post('/api/validate-key', async (req, res) => {
+  const userApiKey = req.headers['x-user-api-key'];
+  
+  if (!userApiKey || userApiKey.length < 30) {
+    return res.json({ valid: false, tier: 'unknown', message: 'Invalid key format' });
+  }
+  
+  try {
+    // Test the API key by making a simple text request (not image)
+    const testAI = new GoogleGenAI({ apiKey: userApiKey });
+    const response = await testAI.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: [{ role: 'user', parts: [{ text: 'Reply with just "OK"' }] }]
+    });
+    
+    if (response && response.text) {
+      logger.info('Custom API key validated successfully');
+      // Key is valid, but we can't easily determine if it's free or paid
+      // We'll assume it's valid and let the actual request fail if quota exceeded
+      res.json({ 
+        valid: true, 
+        tier: 'unknown', // Can't determine tier from simple test
+        message: 'API key is valid. Note: Free tier has limited image generation quota.',
+        warning: 'Image generation (Magic Edit) requires paid API access for some models.'
+      });
+    } else {
+      res.json({ valid: false, tier: 'unknown', message: 'Invalid response from API' });
+    }
+  } catch (error) {
+    logger.error('API key validation failed', { error: error.message });
+    
+    // Check if it's a quota error (which means key is valid but quota exceeded)
+    if (error.message && error.message.includes('quota')) {
+      res.json({ 
+        valid: true, 
+        tier: 'free',
+        message: 'API key valid but quota exceeded. Free tier has limited usage.',
+        warning: 'Consider upgrading to paid plan for unlimited image generation.'
+      });
+    } else {
+      res.json({ valid: false, tier: 'unknown', message: error.message });
+    }
+  }
+});
+
+// ===== USAGE TRACKING SYSTEM =====
+// In-memory storage for usage tracking (resets on server restart)
+// For production, use Redis or database
+const usageTracker = {};
+const MODEL_LIMITS = {
+  'nano-banana': 5,
+  'nano-banana-pro': 1
+};
+
+// Get today's date key
+const getTodayKey = () => new Date().toISOString().split('T')[0];
+
+// Get usage count for a session/model
+const getUsageCount = (sessionId, model) => {
+  const key = `${getTodayKey()}_${sessionId}_${model}`;
+  return usageTracker[key] || 0;
+};
+
+// Increment usage count
+const incrementUsage = (sessionId, model) => {
+  const key = `${getTodayKey()}_${sessionId}_${model}`;
+  usageTracker[key] = (usageTracker[key] || 0) + 1;
+  return usageTracker[key];
+};
+
+// Check if usage limit reached
+const isLimitReached = (sessionId, model) => {
+  const count = getUsageCount(sessionId, model);
+  const limit = MODEL_LIMITS[model] || 5;
+  return count >= limit;
+};
+
+// Usage API endpoint
+app.get('/api/usage', (req, res) => {
+  const { session, model } = req.query;
+  const count = getUsageCount(session || 'default', model || 'nano-banana');
+  const limit = MODEL_LIMITS[model] || 5;
+  res.json({ count, limit, remaining: Math.max(0, limit - count) });
+});
+
+// ===== GALLERY API =====
+// In-memory fallback for demo if Firebase not connected
+const fallbackGallery = [
+  { id: '1', prompt: 'Cinematic portrait of a cyborg in neon rain', image: '/samples/landscape.webp', timestamp: Date.now() },
+  { id: '2', prompt: 'Cyberpunk street food stall, night time', image: '/samples/landscape.webp', timestamp: Date.now() }
+];
+
+// GET /api/gallery
+// GET /api/gallery (Public Community Feed)
+app.get('/api/gallery', async (req, res) => {
+  const span = tracer.startSpan('web.request');
+  span.setTag('resource.name', 'GET /api/gallery');
+  
+  try {
+    if (db) {
+      const snapshot = await db.collection('gallery')
+        .where('isPublic', '==', true) // Filter mainly by Public
+        .orderBy('timestamp', 'desc')
+        .limit(20)
+        .get();
+        
+      const gallery = [];
+      snapshot.forEach(doc => {
+        gallery.push({ id: doc.id, ...doc.data() });
+      });
+      res.json(gallery);
+    } else {
+      res.json(fallbackGallery);
+    }
+  } catch (error) {
+    logger.error('Failed to fetch gallery', { error: error.message });
+    // If index is building, return fallback data instead of error
+    if (error.message.includes('index') || error.code === 9) {
+      logger.info('Index building, returning fallback gallery');
+      res.json(fallbackGallery);
+    } else {
+      res.status(500).json({ error: 'Failed to fetch gallery' });
+    }
+  }
+  span.finish();
+});
+
+// POST /api/gallery (Share or Save to History)
+app.post('/api/gallery', async (req, res) => {
+  const span = tracer.startSpan('web.request');
+  span.setTag('resource.name', 'POST /api/gallery');
+  
+  try {
+    const { image, prompt, model, sessionId, isPublic } = req.body;
+    
+    if (!image || !prompt) {
+      return res.status(400).json({ error: 'Missing image or prompt' });
+    }
+    
+    const entry = {
+      image,
+      prompt,
+      model: model || 'nano-banana',
+      sessionId: sessionId || 'anonymous',
+      isPublic: !!isPublic, // Explicit boolean
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    if (db) {
+      // Save to 'gallery' collection
+      await db.collection('gallery').add(entry);
+      res.json({ success: true, message: isPublic ? 'Shared to Public Gallery' : 'Saved to Private History' });
+    } else {
+      // Add to in-memory fallback
+      if (isPublic) {
+        fallbackGallery.unshift({ 
+          id: Date.now().toString(), 
+          ...entry,
+          timestamp: Date.now() 
+        });
+        if (fallbackGallery.length > 20) fallbackGallery.pop();
+      }
+      res.json({ success: true, message: 'Saved to demo storage (Firebase invalid)' });
+    }
+  } catch (error) {
+    logger.error('Failed to add to gallery', { error: error.message });
+    res.status(500).json({ error: 'Failed to add to gallery' });
+  }
+  span.finish();
+});
+
+// GET /api/history (User's Private History)
+app.get('/api/history', async (req, res) => {
+  const { sessionId } = req.query;
+  if (!sessionId) return res.json([]);
+
+  try {
+    if (db) {
+      const snapshot = await db.collection('gallery')
+        .where('sessionId', '==', sessionId)
+        .orderBy('timestamp', 'desc')
+        .limit(50)
+        .get();
+        
+      const history = [];
+      snapshot.forEach(doc => {
+        history.push({ id: doc.id, ...doc.data() });
+      });
+      res.json(history);
+    } else {
+      // Fallback: return nothing or simple demo
+      res.json([]);
+    }
+  } catch (error) {
+    logger.error('Failed to fetch history', { error: error.message });
+    // If index is building, return empty array instead of error
+    if (error.message.includes('index') || error.code === 9) {
+      logger.info('Index building, returning empty history');
+      res.json([]);
+    } else {
+      res.status(500).json({ error: 'Failed to fetch history' });
+    }
+  }
 });
 
 // Main Analysis Endpoint
@@ -329,7 +495,41 @@ app.post('/api/chat', async (req, res) => {
     span.setTag('chat.message_length', message.length);
     span.setTag('chat.history_length', history ? history.length : 0);
     
-    logger.info('Chat request', { messageLength: message.length, historyLength: history ? history.length : 0 });
+    // === SECURITY: Prompt Injection Detection ===
+    const suspiciousPatterns = [
+      /ignore\s+(previous|all|above)\s+instructions?/i,
+      /disregard\s+(previous|all|your)\s+instructions?/i,
+      /system\s*prompt/i,
+      /you\s+are\s+now\s+a/i,
+      /pretend\s+you\s+are/i,
+      /act\s+as\s+if/i,
+      /<script>/i,
+      /javascript:/i,
+      /\{\{.*\}\}/,  // Template injection
+      /\$\{.*\}/     // Variable injection
+    ];
+    
+    const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(message));
+    
+    if (isSuspicious) {
+      logger.warn('Potential prompt injection detected', {
+        event_type: 'security_alert',
+        alert_type: 'prompt_injection',
+        message_preview: message.substring(0, 100),
+        user_ip: req.ip,
+        severity: 'high'
+      });
+      sendMetric('app.security.prompt_injection_attempt', 1, ['severity:high']);
+      span.setTag('security.prompt_injection', true);
+    } else {
+      sendMetric('app.security.prompt_injection_attempt', 0, ['severity:none']);
+    }
+    
+    logger.info('Chat request', { 
+      messageLength: message.length, 
+      historyLength: history ? history.length : 0,
+      security_check: isSuspicious ? 'flagged' : 'passed'
+    });
 
     if (!genAI) {
       // Demo response
@@ -345,34 +545,40 @@ app.post('/api/chat', async (req, res) => {
     const systemInstruction = `You are "The Director", a world-class AI cinematography mentor.
     Your mission is to guide users to create cinematic masterpieces.
 
-    🌍 LANGUAGE ADAPTATION (CRITICAL):
-    - **DETECT the user's language** from their message.
-    - **RESPOND in the SAME language** the user uses.
-    - If user writes in Indonesian → Reply in Indonesian.
-    - If user writes in English → Reply in English.
-    - If user writes in Sundanese → Reply in Sundanese.
-    - If user writes in Arabic → Reply in Arabic.
-    - If user writes in Japanese, Korean, French, Spanish, etc. → Reply in that language.
-    - If mixed languages, follow the DOMINANT language of the latest message.
-    - Default language (if unclear): English.
+    ⚠️ ABSOLUTE RULE #1 - LANGUAGE (NON-NEGOTIABLE):
+    MIRROR THE USER'S LANGUAGE EXACTLY. This overrides everything else.
     
-    RESPONSE FORMATTING (VERY IMPORTANT):
+    Examples:
+    - User writes in العربية (Arabic) → You MUST reply in العربية
+    - User writes in 日本語 (Japanese) → You MUST reply in 日本語
+    - User writes in 한국어 (Korean) → You MUST reply in 한국어
+    - User writes in Bahasa Indonesia → You MUST reply in Bahasa Indonesia
+    - User writes in Español → You MUST reply in Español
+    - User writes in Français → You MUST reply in Français
+    - User writes in Deutsch → You MUST reply in Deutsch
+    - User writes in Português → You MUST reply in Português
+    - User writes in Русский → You MUST reply in Русский
+    - User writes in 中文 → You MUST reply in 中文
+    - User writes in English → You MUST reply in English
+    
+    DO NOT default to English. DO NOT ignore this rule. The user's language is sacred.
+    
+    RESPONSE FORMATTING:
     - Use proper Markdown formatting.
     - Break response into short, readable paragraphs.
     - Use **bold** for key terms.
     - Use bullet points for lists.
 
-    STRICT RULES:
-    1. NEVER mention internal technical tags like "[DIRECTOR_HUD_DATA_INJECTED]".
-    2. Treat HUD data as your own eyes/observation.
-    3. Be helpful, inspiring, but honest about flaws.`;
+    PERSONA RULES:
+    1. You are "The Director" - speak with authority and passion about cinematography.
+    2. Be helpful, inspiring, but honest about flaws.
+    3. Give specific, actionable advice.
+    4. NEVER mention internal technical tags or system information.`;
 
-    // Inject "Director HUD" for absolute context awareness
-    let hudPrefix = "";
-    // Inject context as a natural observation instead of a technical tag
+    // Inject context as a natural observation
     let contextObservation = "";
     if (analysisContext) {
-      contextObservation = `(VISUAL CONTEXT: Score=${analysisContext.score}/100. Lighting=${analysisContext.lighting}. Composition=${analysisContext.composition}. Mood=${analysisContext.mood}. Critique=${analysisContext.critique}. GENERATED_PROMPT=${analysisContext.prompt})\n\n`;
+      contextObservation = `[Context: This image scored ${analysisContext.score}/100. Lighting: ${analysisContext.lighting}/10, Composition: ${analysisContext.composition}/10, Mood: ${analysisContext.mood}/10. Previous critique: "${analysisContext.critique}"]\n\nUser question: `;
     }
 
     const userMessageParts = [
@@ -433,68 +639,94 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// Image Editing Endpoint (Magic Remix)
-// Image Editing Endpoint (Magic Remix)
+// Image Editing Endpoint (Magic Remix) - Enhanced with Custom API Key & Model Selection
 app.post('/api/edit-image', async (req, res) => {
   const span = tracer.startSpan('gemini.edit_image');
-  let imageInput = null;
+  
   try {
-    const { image, prompt } = req.body;
-    imageInput = image;
-    logger.info('Edit Image Request', { prompt_length: prompt.length });
-
-    if (!genAI) {
-        // Fallback for Demo
-        sendMetric('app.ai.edit.success', 1);
+    const { image, prompt, model: selectedModel, sessionId } = req.body;
+    const userApiKey = req.headers['x-user-api-key'];
+    
+    // Determine which model to use
+    const modelMapping = {
+      'nano-banana': 'models/gemini-2.5-flash-image',
+      'nano-banana-pro': 'models/gemini-3-pro-image-preview'
+    };
+    const modelToUse = modelMapping[selectedModel] || modelMapping['nano-banana'];
+    const modelKey = selectedModel || 'nano-banana';
+    
+    logger.info('Edit Image Request', { 
+      prompt_length: prompt.length,
+      model: modelKey,
+      hasCustomKey: !!userApiKey
+    });
+    
+    // Check usage limits (only if NOT using custom API key)
+    if (!userApiKey) {
+      if (isLimitReached(sessionId || 'default', modelKey)) {
         span.finish();
-        return res.json({
-            reply: "Demo Mode: AI not connected. Cannot edit image.",
-            editedImage: null
+        return res.status(429).json({
+          reply: `Daily limit reached for ${modelKey === 'nano-banana-pro' ? 'Nano Banana Pro (1/day)' : 'Nano Banana (5/day)'}. Add your own API key for unlimited usage!`,
+          editedImage: null,
+          limitReached: true
         });
+      }
+    }
+    
+    // Determine which GenAI client to use
+    let aiClient = genAI;
+    if (userApiKey) {
+      // Create new client with user's API key
+      try {
+        aiClient = new GoogleGenAI({ apiKey: userApiKey });
+        logger.info('Using custom user API key');
+      } catch (e) {
+        return res.status(400).json({ reply: 'Invalid API key provided', editedImage: null });
+      }
+    }
+    
+    if (!aiClient) {
+      sendMetric('app.ai.edit.success', 1);
+      span.finish();
+      return res.json({
+        reply: "Demo Mode: AI not connected. Cannot edit image.",
+        editedImage: null
+      });
     }
 
     const fs = require('fs');
     let imageData = null;
 
     if (image.startsWith('data:')) {
-        imageData = image.replace(/^data:image\/[a-z]+;base64,/, '');
+      imageData = image.replace(/^data:image\/[a-z]+;base64,/, '');
     } else if (image.startsWith('/samples/')) {
-        // Resolve sample path to root public folder
-        const samplePath = path.join(__dirname, '../client/public', image);
-        try {
-            const buffer = fs.readFileSync(samplePath);
-            imageData = buffer.toString('base64');
-        } catch (e) {
-            logger.error('Failed to read sample image', { path: samplePath, error: e.message });
-        }
+      const samplePath = path.join(__dirname, '../client/public', image);
+      try {
+        const buffer = fs.readFileSync(samplePath);
+        imageData = buffer.toString('base64');
+      } catch (e) {
+        logger.error('Failed to read sample image', { path: samplePath, error: e.message });
+      }
     }
 
     if (!imageData) {
-        return res.status(400).json({ reply: "Invalid image data format." });
+      return res.status(400).json({ reply: "Invalid image data format." });
     }
 
-    // Initialize Generation Config for Multimodal Edit
+    // Generation Config
     const generationConfig = {
-      maxOutputTokens: 32768,
-      temperature: 1,
-      topP: 0.95,
-      responseModalities: ["TEXT", "IMAGE"],
-      thinking: true,
-      safetySettings: [
-        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
-        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'OFF' },
-        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
-        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' }
-      ]
+      responseModalities: ["Text", "Image"]
     };
 
     const userPrompt = `You are a professional visual effects artist. 
     I will provide an image and you will generate a NEW VERSION of it based on this request: "${prompt}".
     Return the result as a new image. If you need to explain, do it briefly in text.`;
 
-    // Call generateContent with gemini-2.5-flash-image
-    const response = await genAI.models.generateContent({
-      model: 'models/gemini-2.5-flash-image',
+    span.setTag('ai.model', modelToUse);
+    
+    // Call generateContent with selected model
+    const response = await aiClient.models.generateContent({
+      model: modelToUse,
       contents: [
         {
           role: 'user',
@@ -517,20 +749,99 @@ app.post('/api/edit-image', async (req, res) => {
     let editedImageBase64 = null;
 
     try {
-      const parts = response.candidates[0].content.parts;
-      for (const part of parts) {
-        if (part.text) {
-          reply = part.text;
-        }
-        if (part.inlineData && part.inlineData.mimeType.startsWith('image/')) {
-          editedImageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      // Log full response structure for debugging
+      logger.info('Magic Edit raw response', { 
+        responseType: typeof response,
+        responseKeys: response ? Object.keys(response) : 'null',
+        hasText: typeof response?.text,
+        hasCandidates: !!response?.candidates
+      });
+
+      // Method 1: Try response.candidates (standard structure)
+      if (response?.candidates?.[0]?.content?.parts) {
+        const parts = response.candidates[0].content.parts;
+        logger.info('Found parts via candidates', { partsLength: parts.length });
+        
+        for (const part of parts) {
+          if (part.text) {
+            reply = part.text;
+          }
+          if (part.inlineData?.mimeType?.startsWith('image/')) {
+            editedImageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            logger.info('Found image in candidates.parts');
+          }
         }
       }
+      
+      // Method 2: Try response.response.candidates (wrapped response)
+      if (!editedImageBase64 && response?.response?.candidates?.[0]?.content?.parts) {
+        const parts = response.response.candidates[0].content.parts;
+        logger.info('Found parts via response.response.candidates', { partsLength: parts.length });
+        
+        for (const part of parts) {
+          if (part.text) {
+            reply = part.text;
+          }
+          if (part.inlineData?.mimeType?.startsWith('image/')) {
+            editedImageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            logger.info('Found image in response.response.candidates.parts');
+          }
+        }
+      }
+
+      // Method 3: Direct iteration if response has Symbol.iterator
+      if (!editedImageBase64 && response && typeof response[Symbol.iterator] === 'function') {
+        logger.info('Response is iterable, trying direct iteration');
+        for (const part of response) {
+          if (part.text) {
+            reply = part.text;
+          }
+          if (part.inlineData?.mimeType?.startsWith('image/')) {
+            editedImageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            logger.info('Found image via direct iteration');
+          }
+        }
+      }
+
+      // Method 4: Check if response itself has inlineData (single part response)
+      if (!editedImageBase64 && response?.inlineData?.mimeType?.startsWith('image/')) {
+        editedImageBase64 = `data:${response.inlineData.mimeType};base64,${response.inlineData.data}`;
+        logger.info('Found image directly on response');
+      }
+
+      // Method 5: Try text property/method for reply
+      if (!editedImageBase64) {
+        if (typeof response?.text === 'function') {
+          reply = response.text();
+        } else if (typeof response?.text === 'string') {
+          reply = response.text;
+        }
+      }
+
+      // Log final extraction result
+      logger.info('Magic Edit extraction result', {
+        hasReply: !!reply,
+        replyPreview: reply?.substring(0, 100),
+        hasImage: !!editedImageBase64,
+        imageDataLength: editedImageBase64?.length || 0
+      });
+
     } catch (e) {
-      logger.error('Magic Edit parsing failed', { error: e.message });
+      logger.error('Magic Edit parsing failed', { 
+        error: e.message, 
+        stack: e.stack,
+        responseKeys: response ? Object.keys(response) : 'null',
+        responseStr: JSON.stringify(response)?.substring(0, 500)
+      });
     }
 
     sendMetric('app.ai.edit.success', 1);
+    
+    // Increment usage counter (only if not using custom API key)
+    if (!userApiKey) {
+      incrementUsage(sessionId || 'default', modelKey);
+    }
+    
     span.finish();
     
     res.json({ 
@@ -540,6 +851,25 @@ app.post('/api/edit-image', async (req, res) => {
 
   } catch (error) {
     logger.error('Edit failed', { error: error.message });
+    
+    // Check for quota/rate limit errors
+    const errorStr = JSON.stringify(error);
+    const isQuotaError = error.message?.includes('quota') || 
+                         error.message?.includes('429') || 
+                         error.message?.includes('RESOURCE_EXHAUSTED') ||
+                         errorStr.includes('quota') ||
+                         errorStr.includes('RESOURCE_EXHAUSTED');
+    
+    if (isQuotaError) {
+      // Return specific quota error message
+      return res.status(429).json({ 
+        reply: "⚠️ API quota exceeded! Free tier API keys have very limited image generation (often 0 per day for image models). To use Magic Edit, you need a paid Google AI API key. Visit https://ai.google.dev to upgrade your plan.",
+        editedImage: null,
+        limitReached: true,
+        quotaError: true
+      });
+    }
+    
     // Soft Fallback - Don't crash UI
     res.json({ 
         reply: "System Advice: " + error.message,
@@ -569,6 +899,19 @@ app.post('/api/simulate-error', (req, res) => {
     message: 'Simulated error for Datadog demo',
     timestamp: new Date().toISOString()
   });
+});
+
+// ===== SERVE FRONTEND (PRODUCTION) =====
+// Serve static files from React app
+app.use(express.static(path.join(__dirname, '../client/dist')));
+
+// Handle React routing, return all requests to React app
+app.get('*', (req, res) => {
+  // Check if request is for API (to avoid 404s for missing API routes returning HTML)
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
+  res.sendFile(path.join(__dirname, '../client/dist', 'index.html'));
 });
 
 // Only start the server if not running in Vercel (local dev or VPS)

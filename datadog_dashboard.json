@@ -1,1 +1,348 @@
-{"title":"Director's Eye - AI Observability (GenAI + APM)","description":"Auto-generated Dashboard for Hackathon. Monitors Gemini AI Performance, Tokens, Costs, and User Experience.","widgets":[{"id":2377075395371182,"definition":{"title":"🤖 AI Performance & Cost (Winner Metrics)","type":"group","layout_type":"ordered","widgets":[{"id":4318043728173609,"definition":{"title":"Token Usage (Total)","show_legend":true,"legend_layout":"auto","type":"timeseries","requests":[{"response_format":"timeseries","queries":[{"data_source":"metrics","name":"query1","query":"sum:app.ai.tokens.total{env:production}.as_count()"}],"style":{"palette":"purple","line_type":"solid","line_width":"normal"},"display_type":"bars"}]}},{"id":2669376649558304,"definition":{"title":"Estimated AI Cost (USD)","show_legend":true,"legend_layout":"auto","type":"timeseries","requests":[{"response_format":"timeseries","queries":[{"data_source":"metrics","name":"query1","query":"sum:app.ai.cost.estimated{env:production}"}],"formulas":[{"formula":"cumsum(query1)"}],"style":{"palette":"green","line_type":"solid","line_width":"thick"},"display_type":"line"}]}},{"id":7681381852177243,"definition":{"title":"Magic Edits Performed","type":"query_value","requests":[{"response_format":"scalar","queries":[{"data_source":"metrics","name":"query1","query":"sum:app.ai.edit.success{env:production}.as_count()","aggregator":"sum"}]}]}}]}},{"id":5612702384084490,"definition":{"title":"🛡️ Security & Quality Signals","type":"group","layout_type":"ordered","widgets":[{"id":7139856190433885,"definition":{"title":"Avg Cinematography Score","type":"query_value","requests":[{"conditional_formats":[{"comparator":"<","value":50,"palette":"red_on_white"},{"comparator":">=","value":80,"palette":"green_on_white"}],"response_format":"scalar","queries":[{"data_source":"metrics","name":"query1","query":"avg:app.cinematography.score{env:production}","aggregator":"avg"}]}]}},{"id":6618526023697277,"definition":{"title":"Backend Error Logs","requests":[{"response_format":"event_list","query":{"data_source":"logs_stream","query_string":"service:directors-eye-backend status:error OR status:warn","indexes":[],"storage":"hot","sort":{"order":"desc","column":"date"}},"columns":[{"field":"status_line","width":"auto"},{"field":"timestamp","width":"auto"},{"field":"date","width":"auto"},{"field":"message","width":"auto"},{"field":"service","width":"auto"},{"field":"content","width":"auto"}]}],"type":"list_stream"}}]}}],"template_variables":[{"name":"env","prefix":"env","available_values":[],"default":"production"}],"layout_type":"ordered","notify_list":[],"reflow_type":"auto","pause_auto_refresh":false}
+{
+  "title": "Director's Eye - LLM Observability Dashboard",
+  "description": "End-to-end observability for AI-powered cinematography analysis. Monitors Gemini LLM performance, security signals, costs, and user experience.",
+  "widgets": [
+    {
+      "id": 1,
+      "definition": {
+        "title": "🎯 LLM Health Overview",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "AI Status",
+              "type": "check_status",
+              "check": "app.health",
+              "grouping": "cluster",
+              "tags": ["service:directors-eye-backend"]
+            }
+          },
+          {
+            "definition": {
+              "title": "Total LLM Requests (24h)",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "query1",
+                  "query": "sum:trace.express.request.hits{service:directors-eye-backend,resource:/api/analyze OR resource:/api/chat OR resource:/api/edit-image}.as_count()",
+                  "aggregator": "sum"
+                }]
+              }],
+              "precision": 0
+            }
+          },
+          {
+            "definition": {
+              "title": "Error Rate",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "errors",
+                  "query": "sum:trace.express.request.errors{service:directors-eye-backend}.as_count()",
+                  "aggregator": "sum"
+                }, {
+                  "data_source": "metrics",
+                  "name": "hits",
+                  "query": "sum:trace.express.request.hits{service:directors-eye-backend}.as_count()",
+                  "aggregator": "sum"
+                }],
+                "formulas": [{"formula": "(errors / hits) * 100"}]
+              }],
+              "precision": 2,
+              "custom_unit": "%"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "definition": {
+        "title": "🤖 LLM Token Usage & Cost",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Token Usage Over Time",
+              "type": "timeseries",
+              "requests": [{
+                "response_format": "timeseries",
+                "queries": [
+                  {"data_source": "metrics", "name": "prompt", "query": "sum:app.ai.tokens.prompt{*}.as_count()"},
+                  {"data_source": "metrics", "name": "completion", "query": "sum:app.ai.tokens.completion{*}.as_count()"}
+                ],
+                "display_type": "bars",
+                "style": {"palette": "purple"}
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "Cumulative AI Cost (USD)",
+              "type": "timeseries",
+              "requests": [{
+                "response_format": "timeseries",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "cost",
+                  "query": "sum:app.ai.cost.estimated{*}"
+                }],
+                "formulas": [{"formula": "cumsum(cost)"}],
+                "display_type": "line",
+                "style": {"palette": "green", "line_width": "thick"}
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "Magic Edits Today",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "edits",
+                  "query": "sum:app.ai.edit.success{*}.as_count()",
+                  "aggregator": "sum"
+                }]
+              }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "definition": {
+        "title": "🛡️ Security & Quality Signals",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Prompt Injection Attempts",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "injections",
+                  "query": "sum:app.security.prompt_injection_attempt{severity:high}.as_count()",
+                  "aggregator": "sum"
+                }],
+                "conditional_formats": [
+                  {"comparator": ">", "value": 0, "palette": "red_on_white"},
+                  {"comparator": "<=", "value": 0, "palette": "green_on_white"}
+                ]
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "Avg Cinematography Score",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "score",
+                  "query": "avg:app.cinematography.score{*}",
+                  "aggregator": "avg"
+                }],
+                "conditional_formats": [
+                  {"comparator": "<", "value": 50, "palette": "red_on_white"},
+                  {"comparator": ">=", "value": 80, "palette": "green_on_white"},
+                  {"comparator": ">=", "value": 50, "palette": "yellow_on_white"}
+                ]
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "Security Events Log",
+              "type": "list_stream",
+              "requests": [{
+                "response_format": "event_list",
+                "query": {
+                  "data_source": "logs_stream",
+                  "query_string": "service:directors-eye-backend @event_type:security_alert",
+                  "indexes": [],
+                  "storage": "hot"
+                },
+                "columns": [
+                  {"field": "timestamp", "width": "auto"},
+                  {"field": "@alert_type", "width": "auto"},
+                  {"field": "@severity", "width": "auto"},
+                  {"field": "message", "width": "auto"}
+                ]
+              }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "definition": {
+        "title": "⚡ Performance & Latency",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "AI Processing Time (ms)",
+              "type": "timeseries",
+              "requests": [{
+                "response_format": "timeseries",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "latency",
+                  "query": "avg:app.ai.processing_time{*}"
+                }],
+                "display_type": "line",
+                "style": {"palette": "orange"}
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "P95 Latency",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "p95",
+                  "query": "p95:app.ai.processing_time{*}",
+                  "aggregator": "percentile"
+                }]
+              }],
+              "custom_unit": "ms"
+            }
+          },
+          {
+            "definition": {
+              "title": "Request Distribution",
+              "type": "toplist",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "metrics",
+                  "name": "hits",
+                  "query": "sum:trace.express.request.hits{service:directors-eye-backend} by {resource}.as_count()",
+                  "aggregator": "sum"
+                }]
+              }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "definition": {
+        "title": "📊 LLM Observability Traces",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Recent LLM Traces",
+              "type": "list_stream",
+              "requests": [{
+                "response_format": "event_list",
+                "query": {
+                  "data_source": "trace_stream",
+                  "query_string": "service:directors-eye-backend @_top_level:1",
+                  "indexes": []
+                },
+                "columns": [
+                  {"field": "timestamp", "width": "auto"},
+                  {"field": "resource", "width": "auto"},
+                  {"field": "duration", "width": "auto"},
+                  {"field": "@http.status_code", "width": "auto"}
+                ]
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "Error Logs",
+              "type": "list_stream",
+              "requests": [{
+                "response_format": "event_list",
+                "query": {
+                  "data_source": "logs_stream",
+                  "query_string": "service:directors-eye-backend status:error",
+                  "indexes": [],
+                  "storage": "hot"
+                },
+                "columns": [
+                  {"field": "timestamp", "width": "auto"},
+                  {"field": "message", "width": "auto"},
+                  {"field": "@error", "width": "auto"}
+                ]
+              }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "definition": {
+        "title": "👥 User Experience (RUM)",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Active Sessions",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "rum",
+                  "name": "sessions",
+                  "query": "@type:session",
+                  "aggregator": "cardinality"
+                }]
+              }]
+            }
+          },
+          {
+            "definition": {
+              "title": "Frontend Errors",
+              "type": "query_value",
+              "requests": [{
+                "response_format": "scalar",
+                "queries": [{
+                  "data_source": "rum",
+                  "name": "errors",
+                  "query": "@type:error",
+                  "aggregator": "count"
+                }],
+                "conditional_formats": [
+                  {"comparator": ">", "value": 0, "palette": "red_on_white"}
+                ]
+              }]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "template_variables": [
+    {"name": "env", "prefix": "env", "default": "production"},
+    {"name": "service", "prefix": "service", "default": "directors-eye-backend"}
+  ],
+  "layout_type": "ordered",
+  "notify_list": [],
+  "reflow_type": "auto"
+}

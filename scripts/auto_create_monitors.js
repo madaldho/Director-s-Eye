@@ -76,47 +76,49 @@ function checkSite(site) {
 }
 
 
-const monitors = [
-  {
-    "name": "[High Urgency] High Error Rate (>1%)",
-    "type": "query alert",
-    "query": "sum(last_5m):sum:trace.express.request.errors{service:directors-eye-backend}.as_count() / sum:trace.express.request.hits{service:directors-eye-backend}.as_count() > 0.01",
-    "message": "{{#is_alert}}\n⚠️ **CRITICAL: High Error Rate Detected!**\n\n**Action Required:**\n1. Check logs for 500 errors.\n2. Verify Gemini API Connectivity.\n3. **Declare Incident** if sustained > 5 mins.\n\n@pagerduty-engineering\n@slack-alerts\n{{/is_alert}}",
-    "tags": ["env:production", "service:directors-eye-backend", "team:ai"],
-    "options": {
-      "thresholds": {
-        "critical": 0.01,
-        "warning": 0.005
-      }
-    }
-  },
-  {
-    "name": "[Performance] High Latency (>5s)",
-    "type": "query alert",
-    "query": "avg(last_5m):avg:trace.express.request.duration{service:directors-eye-backend} > 5",
-    "message": "{{#is_alert}}\n🐢 **PERFORMANCE DEGRADATION**\n\n**Impact:** User experience severely affected.\n**Action:** Investigate Trace ID in APM.\n\n@slack-alerts\n{{/is_alert}}",
-    "tags": ["env:production", "service:directors-eye-backend", "performance"],
-    "options": {
-      "thresholds": {
-        "critical": 5,
-        "warning": 3
-      }
-    }
-  },
-  {
-    "name": "[Business Logic] Low Cinematography Score (<50)",
-    "type": "metric alert",
-    "query": "avg(last_5m):avg:app.cinematography.score{service:directors-eye-backend} < 50",
-    "message": "{{#is_alert}}\n📉 **QUALITY ALERT: Model Hallucination Risk**\n\n**Action:**\n1. Review recent inputs in Dashboard.\n2. Check for adversarial images.\n\n@team-lead\n{{/is_alert}}",
-    "tags": ["env:production", "service:directors-eye-backend", "quality"],
-    "options": {
-      "thresholds": {
-        "critical": 50,
-        "warning": 60
-      }
-    }
+// Load monitors from JSON files in the root directory
+const monitors = [];
+const rootDir = path.resolve(__dirname, '..');
+
+try {
+  const files = fs.readdirSync(rootDir);
+  const monitorFiles = files.filter(file => file.startsWith('monitor_') && file.endsWith('.json'));
+
+  if (monitorFiles.length === 0) {
+    console.log('⚠️ No monitor_*.json files found in root directory. Using default/fallback monitors if any.');
   }
-];
+
+  monitorFiles.forEach(file => {
+    try {
+      const filePath = path.join(rootDir, file);
+      const fileContent = fs.readFileSync(filePath, 'utf8');
+      const monitorDef = JSON.parse(fileContent);
+      
+      // Clean up the definition for creation (remove ID to avoid conflicts if creating new)
+      const { id, created, modified, creator, ...cleanMonitor } = monitorDef;
+
+      // START FIX: Datadog API sometimes rejects runbook_url in options or it is deprecated
+      if (cleanMonitor.options && cleanMonitor.options.runbook_url) {
+          console.log(`   ℹ️ Removing runbook_url from ${cleanMonitor.name} options to avoid API error.`);
+          delete cleanMonitor.options.runbook_url;
+      }
+      // END FIX
+      
+      console.log(`Loading monitor from ${file}: ${cleanMonitor.name}`);
+      monitors.push(cleanMonitor);
+    } catch (err) {
+      console.error(`❌ Failed to load monitor from ${file}:`, err.message);
+    }
+  });
+
+} catch (err) {
+  console.error('❌ Error locating monitor files:', err);
+}
+
+// Fallback if no files found (Optional: keep original examples if desired, or just leave empty)
+if (monitors.length === 0) {
+    console.log("ℹ️ Empty monitor list. Nothing to create.");
+}
 
 function createMonitor(monitor) {
   return new Promise((resolve, reject) => {

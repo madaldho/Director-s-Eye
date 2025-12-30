@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { datadogRum } from '@datadog/browser-rum'
 import Navbar from './components/Navbar'
@@ -7,6 +7,15 @@ import HomePage from './pages/HomePage'
 import AnalysisPage from './pages/AnalysisPage'
 
 function App() {
+  // Initialize sessionId on app start (before any component needs it)
+  useEffect(() => {
+    if (!sessionStorage.getItem('session_id')) {
+      const id = Math.random().toString(36).substring(2, 10).toUpperCase();
+      sessionStorage.setItem('session_id', id);
+      console.log('Session ID initialized:', id);
+    }
+  }, []);
+
   // Initialize from LocalStorage to persist state updates/refresh
   const [analysisResult, setAnalysisResult] = useState(() => {
     const saved = localStorage.getItem('lastAnalysis');

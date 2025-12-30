@@ -11,11 +11,21 @@ import {
   Sparkles,
   Aperture,
   Maximize2,
-  Info
+  Info,
+  Globe,
+  Download,
+  Users,
+  Lock,
+  CheckCircle,
+  X,
+  AlertCircle
 } from 'lucide-react'
-import axios from 'axios'
+import { db } from '../firebase'
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
 import ReactMarkdown from 'react-markdown'
+import axios from 'axios'
 import { cn } from '../lib/utils'
+import { compressImage } from '../lib/imageUtils'
 
 const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const [chatMessages, setChatMessages] = useState([])
@@ -26,16 +36,66 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const [copiedSummary, setCopiedSummary] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
   
+  // Share to Community Modal State
+  const [shareModal, setShareModal] = useState({ open: false, image: null, prompt: '' })
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [publishSuccess, setPublishSuccess] = useState(false)
+  const [toast, setToast] = useState({ show: false, type: '', message: '' })
+
+  // Toast helper
+  const showToast = (type, message) => {
+    setToast({ show: true, type, message })
+    setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000)
+  }
+  
   // Edit State
   const [isEditing, setIsEditing] = useState(false)
   const [editPrompt, setEditPrompt] = useState('')
   const [isGeneratingEdit, setIsGeneratingEdit] = useState(false)
   const [editedImage, setEditedImage] = useState(null)
-  const MAX_EDITS = 5
   
-  // Persistent daily quota
+  // Model configurations - must match Navbar
+  const MODEL_CONFIG = {
+    'nano-banana': { name: 'Nano Banana', limit: 5, model: 'gemini-2.5-flash-image' },
+    'nano-banana-pro': { name: 'Nano Banana Pro', limit: 1, model: 'gemini-3-pro-image-preview' }
+  }
+  
+  // Get selected model from localStorage (synced with Navbar)
+  const [selectedModel, setSelectedModel] = useState(() => 
+    localStorage.getItem('image_model') || 'nano-banana'
+  )
+  
+  // Check if user has custom API key (synced with Navbar)
+  const [hasCustomKey, setHasCustomKey] = useState(() => {
+    const key = localStorage.getItem('gemini_api_key') || ''
+    return key.length > 10
+  })
+  
+  // Listen for model and API key changes from Navbar
+  useEffect(() => {
+    const syncFromStorage = () => {
+      const newModel = localStorage.getItem('image_model') || 'nano-banana'
+      setSelectedModel(newModel)
+      
+      const apiKey = localStorage.getItem('gemini_api_key') || ''
+      setHasCustomKey(apiKey.length > 10)
+    }
+    
+    window.addEventListener('storage', syncFromStorage)
+    // Poll every 500ms for same-tab changes (faster sync)
+    const interval = setInterval(syncFromStorage, 500)
+    return () => {
+      window.removeEventListener('storage', syncFromStorage)
+      clearInterval(interval)
+    }
+  }, [])
+  
+  const currentModelConfig = MODEL_CONFIG[selectedModel] || MODEL_CONFIG['nano-banana']
+  const MAX_EDITS = currentModelConfig.limit
+  
+  // Persistent daily quota - per model
   const [editCount, setEditCount] = useState(() => {
-    const saved = localStorage.getItem('magic_edit_quota')
+    const saved = localStorage.getItem(`magic_edit_quota_${selectedModel}`)
     if (saved) {
       const { date, count } = JSON.parse(saved)
       const today = new Date().toISOString().split('T')[0]
@@ -43,6 +103,20 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
     }
     return 0
   })
+  
+  // Reset editCount when model changes
+  useEffect(() => {
+    const saved = localStorage.getItem(`magic_edit_quota_${selectedModel}`)
+    if (saved) {
+      const { date, count } = JSON.parse(saved)
+      const today = new Date().toISOString().split('T')[0]
+      if (date === today) {
+        setEditCount(count)
+        return
+      }
+    }
+    setEditCount(0)
+  }, [selectedModel])
 
   const [magicHistory, setMagicHistory] = useState([])
 
@@ -50,27 +124,83 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const navigate = useNavigate()
 
   const handleMagicEdit = async () => {
-    if (!editPrompt.trim() || editCount >= MAX_EDITS) return
+    // Bypass limit if user has custom API key
+    const apiKey = localStorage.getItem('gemini_api_key') || ''
+    const userHasKey = apiKey.length > 10
+    
+    if (!editPrompt.trim()) return
+    if (!userHasKey && editCount >= MAX_EDITS) return
     
     const newHistoryItem = { role: 'user', text: editPrompt, timestamp: Date.now() }
     setMagicHistory(prev => [...prev, newHistoryItem])
     
     setIsGeneratingEdit(true)
     try {
+      // Get model and API key from localStorage
+      const selectedModel = localStorage.getItem('image_model') || 'nano-banana'
+      const customApiKey = localStorage.getItem('gemini_api_key') || ''
+      const sessionId = sessionStorage.getItem('session_id') || 'default'
+      
+      const headers = {}
+      if (customApiKey) {
+        headers['X-User-API-Key'] = customApiKey
+      }
+      
       const response = await axios.post('/api/edit-image', {
         image: image,
-        prompt: editPrompt
-      })
+        prompt: editPrompt,
+        model: selectedModel,
+        sessionId: sessionId
+      }, { headers })
+      
+      if (response.data.limitReached) {
+        setMagicHistory(prev => [...prev, { 
+          role: 'ai', 
+          text: response.data.reply, 
+          timestamp: Date.now() 
+        }])
+        return
+      }
+      
       if (response.data.editedImage) {
         setEditedImage(response.data.editedImage)
         
-        // Update persistent quota
+        // Update persistent quota for current model
         const newCount = editCount + 1
         setEditCount(newCount)
-        localStorage.setItem('magic_edit_quota', JSON.stringify({
+        const currentModel = localStorage.getItem('image_model') || 'nano-banana'
+        localStorage.setItem(`magic_edit_quota_${currentModel}`, JSON.stringify({
           date: new Date().toISOString().split('T')[0],
           count: newCount
         }))
+        
+        // Dispatch custom event to notify Navbar to refresh usage
+        window.dispatchEvent(new Event('usage_updated'))
+
+        // Auto-save to private history
+        try {
+           const sessionId = sessionStorage.getItem('session_id') || 'default'
+           // Compress image before saving to Firestore
+           const compressedImage = await compressImage(response.data.editedImage, 600, 0.6)
+           const compressedOriginal = await compressImage(image, 400, 0.5)
+           
+           await addDoc(collection(db, 'gallery'), {
+             image: compressedImage,
+             originalImage: compressedOriginal,
+             prompt: editPrompt,
+             model: selectedModel,
+             sessionId: sessionId,
+             isPublic: false,
+             // Save analysis context for later viewing
+             analysisResult: result,
+             timestamp: serverTimestamp()
+           })
+           console.log('Saved to gallery:', { sessionId, prompt: editPrompt, isPublic: false })
+           // Dispatch event to refresh gallery
+           window.dispatchEvent(new Event('gallery_updated'))
+        } catch (e) {
+           console.error('Failed to save to gallery:', e)
+        }
 
         // Add success message to history
         setMagicHistory(prev => [...prev, { role: 'ai', text: "Image generated successfully.", image: response.data.editedImage, timestamp: Date.now() }])
@@ -78,10 +208,89 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
         setMagicHistory(prev => [...prev, { role: 'ai', text: response.data.reply, timestamp: Date.now() }])
       }
     } catch (e) {
-      setMagicHistory(prev => [...prev, { role: 'ai', text: "Edit failed. Please try again.", timestamp: Date.now() }])
+      let errorMessage = e.response?.data?.reply || "Edit failed. Please try again."
+      
+      // Handle 429 quota exceeded error with user-friendly message
+      if (e.response?.status === 429 || e.response?.data?.limitReached) {
+        errorMessage = e.response?.data?.reply || "Daily limit reached. Add your own API key in Settings (⚙️) for unlimited usage!"
+      }
+      
+      // Handle API quota errors (from Gemini)
+      if (e.message?.includes('quota') || e.message?.includes('429') || e.response?.data?.reply?.includes('quota')) {
+        errorMessage = "⚠️ API quota exceeded. If you're using a free tier API key, image generation has limited daily usage. Consider upgrading to a paid plan at Google AI Studio."
+      }
+      
+      setMagicHistory(prev => [...prev, { role: 'ai', text: errorMessage, timestamp: Date.now() }])
+      showToast('error', 'Generation failed. Check the message above for details.')
     } finally {
       setIsGeneratingEdit(false)
       setEditPrompt('') // Clear input
+    }
+  }
+
+  // Gallery Share Handler (Public or Private)
+  const handleShareToGallery = async (imageToShare, prompt, isPublic = true) => {
+    if (isPublic) {
+      // Open modern share modal instead of confirm()
+      setShareModal({ open: true, image: imageToShare, prompt: prompt })
+      return
+    }
+    
+    // Private save (silent)
+    try {
+      const sessionId = sessionStorage.getItem('session_id') || 'default'
+      await addDoc(collection(db, 'gallery'), {
+        image: imageToShare,
+        originalImage: image,
+        prompt: prompt,
+        model: selectedModel,
+        sessionId: sessionId,
+        isPublic: false,
+        analysisResult: result,
+        timestamp: serverTimestamp()
+      });
+      window.dispatchEvent(new Event('gallery_updated'))
+    } catch (e) {
+      console.error('Failed to save:', e)
+    }
+  }
+
+  // Actual publish to community
+  const handlePublishToCommunity = async () => {
+    if (!shareModal.image) return
+    
+    setIsPublishing(true)
+    try {
+      const sessionId = sessionStorage.getItem('session_id') || 'default'
+      // Compress images before saving
+      const compressedImage = await compressImage(shareModal.image, 800, 0.7)
+      const compressedOriginal = image ? await compressImage(image, 400, 0.5) : null
+      
+      await addDoc(collection(db, 'gallery'), {
+        image: compressedImage,
+        originalImage: compressedOriginal,
+        prompt: shareModal.prompt,
+        model: selectedModel,
+        sessionId: sessionId,
+        isPublic: true,
+        analysisResult: result,
+        timestamp: serverTimestamp()
+      });
+      
+      window.dispatchEvent(new Event('gallery_updated'))
+      setPublishSuccess(true)
+      
+      // Auto close after success animation
+      setTimeout(() => {
+        setShareModal({ open: false, image: null, prompt: '' })
+        setPublishSuccess(false)
+      }, 2000)
+    } catch (e) {
+      console.error('Failed to publish:', e)
+      setShareModal({ open: false, image: null, prompt: '' })
+      showToast('error', 'Failed to publish. Please try again.')
+    } finally {
+      setIsPublishing(false)
     }
   }
 
@@ -91,6 +300,15 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
       return
     }
     datadogRum.startView('analysis')
+    
+    // Check for remix prompt from Gallery
+    const remixPrompt = localStorage.getItem('remix_prompt')
+    if (remixPrompt) {
+      setEditPrompt(remixPrompt)
+      localStorage.removeItem('remix_prompt') // Clear it
+      // Automatically scroll to magic edit section if needed
+      // window.scrollTo({ bottom: 0, behavior: 'smooth' })
+    }
   }, [result, image, navigate])
 
   const scrollToBottom = () => {
@@ -468,14 +686,24 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                              AI Remixed
                            </span>
-                           <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 flex-1 bg-indigo-900/10 min-h-[200px] shadow-[0_0_30px_rgba(99,102,241,0.1)]">
+                           <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 flex-1 bg-indigo-900/10 min-h-[200px] shadow-[0_0_30px_rgba(99,102,241,0.1)] group">
                               <img src={editedImage} className="w-full h-full object-contain absolute inset-0" alt="Edited" />
-                              <a href={editedImage} download="magic-edit.jpg" className="absolute bottom-4 right-4 p-2 bg-black/60 hover:bg-black/80 backdrop-blur text-white rounded-lg border border-white/20 transition-all opacity-0 group-hover:opacity-100">
-                                <Maximize2 className="w-4 h-4" />
-                              </a>
+                              {/* Action buttons overlay */}
+                              <div className="absolute bottom-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <a 
+                                  href={editedImage} 
+                                  download={`directors-eye-remix-${Date.now()}.png`}
+                                  className="p-3 bg-black/70 hover:bg-black/90 backdrop-blur text-white rounded-xl border border-white/20 transition-all flex items-center gap-2"
+                                  title="Download Image"
+                                >
+                                  <Download className="w-4 h-4" />
+                                  <span className="text-xs font-medium">Save</span>
+                                </a>
+                              </div>
                            </div>
-                           <div className="md:hidden text-center text-xs text-zinc-500 italic mt-2">
-                             (Tap image to save)
+                           {/* Mobile hint */}
+                           <div className="md:hidden text-center text-xs text-zinc-500 italic">
+                             Long press image to save on mobile
                            </div>
                         </div>
                      </div>
@@ -493,7 +721,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
 
                             {/* Horizontal Suggestions */}
                             <div className="flex gap-2">
-                                {["Cyberpunk Neon", "Golden Hour", "B&W Film Noir", "Art pencil style", "Moody Fog", "80s Retro"].map((suggestion) => (
+                                {["3D Animation Style", "Golden Hour", "B&W Film Noir", "Art pencil style", "Moody Fog", "make cinematic style"].map((suggestion) => (
                                     <button 
                                       key={suggestion}
                                       onClick={() => setEditPrompt(suggestion)}
@@ -554,16 +782,21 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                 <div className="p-4 md:p-6 bg-zinc-900 border-t border-white/10 shrink-0 mb-safe-area">
                    {!editedImage ? (
                      <div className="flex flex-col gap-3">
-                        {editCount >= MAX_EDITS ? (
+                        {!hasCustomKey && editCount >= MAX_EDITS ? (
                             <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-4 text-red-200 text-center text-sm font-medium flex items-center justify-center gap-2">
                                 <Info className="w-4 h-4" />
-                                Daily limit reached ({MAX_EDITS}/{MAX_EDITS}). Try again tomorrow or upload a new photo.
+                                Daily limit reached ({MAX_EDITS}/{MAX_EDITS}). Add your API key in Settings for unlimited usage!
                             </div>
                         ) : (
                             <>
                                 <div className="flex justify-between items-center px-1">
-                                    <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">PROMPT_INPUT_LAYER</span>
-                                    <span className="text-[10px] text-indigo-400 font-mono font-bold">DAILY QUOTA: {MAX_EDITS - editCount}/{MAX_EDITS}</span>
+                                    <span className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">MODEL: {currentModelConfig.name}</span>
+                                    <span className={cn(
+                                      "text-[10px] font-mono font-bold",
+                                      hasCustomKey ? "text-green-400" : "text-indigo-400"
+                                    )}>
+                                      {hasCustomKey ? '∞ UNLIMITED' : `QUOTA: ${MAX_EDITS - editCount}/${MAX_EDITS}`}
+                                    </span>
                                 </div>
                                 <div className="flex gap-3">
                                     <input 
@@ -590,7 +823,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                         )}
                      </div>
                    ) : (
-                     <div className="flex gap-3 justify-end">
+                     <div className="flex gap-3 justify-end flex-wrap">
                         <button 
                            onClick={() => setEditedImage(null)}
                            className="px-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-white font-medium transition-colors"
@@ -598,17 +831,23 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                           Try Another Edit
                         </button>
                         <button 
+                           onClick={() => handleShareToGallery(editedImage, editPrompt || 'Magic Edit', true)}
+                           className="px-6 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold shadow-lg shadow-green-600/20 flex items-center gap-2"
+                        >
+                          <Globe className="w-4 h-4" />
+                          Share to Community
+                        </button>
+                        <button 
                            onClick={() => {
-                             // Create dummy link to save
                              const link = document.createElement('a');
                              link.href = editedImage;
-                             link.download = `directors-eye-remix-${Date.now()}.jpg`;
+                             link.download = `directors-eye-remix-${Date.now()}.png`;
                              link.click();
                            }}
                            className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/20 flex items-center gap-2"
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                          Save Image
+                          <Download className="w-4 h-4" />
+                          Download
                         </button>
                      </div>
                    )}
@@ -629,6 +868,163 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
           >
             <Check className="w-5 h-5" />
             Summary copied to clipboard!
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modern Share to Community Modal */}
+      <AnimatePresence>
+        {shareModal.open && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl"
+            onClick={() => !isPublishing && setShareModal({ open: false, image: null, prompt: '' })}
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="w-full max-w-lg bg-gradient-to-b from-zinc-900 to-zinc-950 border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Success State */}
+              {publishSuccess ? (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-12 flex flex-col items-center justify-center text-center"
+                >
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", damping: 10, stiffness: 200, delay: 0.1 }}
+                    className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center mb-6"
+                  >
+                    <CheckCircle className="w-10 h-10 text-green-400" />
+                  </motion.div>
+                  <h3 className="text-2xl font-bold text-white mb-2">Published!</h3>
+                  <p className="text-zinc-400">Your creation is now live in the Community Gallery</p>
+                </motion.div>
+              ) : (
+                <>
+                  {/* Header */}
+                  <div className="relative p-6 pb-0">
+                    <button 
+                      onClick={() => setShareModal({ open: false, image: null, prompt: '' })}
+                      className="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full transition-colors"
+                    >
+                      <X className="w-5 h-5 text-zinc-400" />
+                    </button>
+                    
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                        <Globe className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-white">Share to Community</h3>
+                        <p className="text-sm text-zinc-500">Let others see your creation</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div className="p-6">
+                    <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black/30 mb-6">
+                      <img 
+                        src={shareModal.image} 
+                        alt="Preview" 
+                        className="w-full h-48 object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                      
+                      {/* Score badge if available */}
+                      {result?.score && (
+                        <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                          <span className="text-sm font-bold text-white">{result.score}</span>
+                          <span className="text-xs text-zinc-400">/100</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Prompt Preview */}
+                    <div className="bg-white/5 rounded-xl p-4 border border-white/5 mb-6">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Sparkles className="w-3 h-3 text-indigo-400" />
+                        <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Prompt</span>
+                      </div>
+                      <p className="text-sm text-zinc-300 font-mono line-clamp-2">
+                        {shareModal.prompt || 'Magic Edit Creation'}
+                      </p>
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex items-start gap-3 p-4 bg-indigo-500/10 rounded-xl border border-indigo-500/20 mb-6">
+                      <Users className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm text-indigo-200 font-medium">Visible to everyone</p>
+                        <p className="text-xs text-indigo-300/60 mt-1">
+                          Your creation will appear in the Community Gallery where others can view, remix, and get inspired.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShareModal({ open: false, image: null, prompt: '' })}
+                        disabled={isPublishing}
+                        className="flex-1 px-6 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-white font-medium transition-all disabled:opacity-50"
+                      >
+                        Keep Private
+                      </button>
+                      <button
+                        onClick={handlePublishToCommunity}
+                        disabled={isPublishing}
+                        className="flex-1 px-6 py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30 disabled:opacity-50"
+                      >
+                        {isPublishing ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Publishing...
+                          </>
+                        ) : (
+                          <>
+                            <Globe className="w-5 h-5" />
+                            Publish Now
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className={cn(
+              "fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border",
+              toast.type === 'error' 
+                ? "bg-red-950 border-red-500/30 text-red-200" 
+                : toast.type === 'success'
+                ? "bg-green-950 border-green-500/30 text-green-200"
+                : "bg-zinc-900 border-white/10 text-white"
+            )}
+          >
+            {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
+            {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-green-400" />}
+            <span className="font-medium">{toast.message}</span>
           </motion.div>
         )}
       </AnimatePresence>

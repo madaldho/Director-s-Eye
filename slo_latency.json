@@ -1,6 +1,6 @@
 {
   "name": "Director's Eye - API Response Time SLO",
-  "type": "metric",
+  "type": "monitor",
   "description": "99% of AI analysis requests complete within 5 seconds over a 30-day rolling window",
   "thresholds": [
     {
@@ -9,10 +9,6 @@
       "warning": 99.5
     }
   ],
-  "query": {
-    "numerator": "sum:app.ai.processing_time{service:directors-eye-backend, @duration:<5000}.as_count()",
-    "denominator": "sum:trace.express.request.hits{service:directors-eye-backend, resource_name:/api/analyze}.as_count()"
-  },
   "tags": [
     "service:directors-eye-backend",
     "env:production",
