@@ -147,44 +147,118 @@ app.post('/api/validate-key', async (req, res) => {
   }
 });
 
-// ===== USAGE TRACKING SYSTEM =====
-// In-memory storage for usage tracking (resets on server restart)
-// For production, use Redis or database
-const usageTracker = {};
+// ===== USAGE TRACKING SYSTEM (IP + Fingerprint Based) =====
+// Tracks usage by IP address + browser fingerprint to prevent incognito bypass
+// Stores in Firestore for persistence across server restarts
+
 const MODEL_LIMITS = {
   'nano-banana': 5,
   'nano-banana-pro': 1
 };
 
+// In-memory cache (backed by Firestore)
+const usageCache = {};
+
 // Get today's date key
 const getTodayKey = () => new Date().toISOString().split('T')[0];
 
-// Get usage count for a session/model
-const getUsageCount = (sessionId, model) => {
-  const key = `${getTodayKey()}_${sessionId}_${model}`;
-  return usageTracker[key] || 0;
+// Get client IP address (handles proxies)
+const getClientIP = (req) => {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip || req.connection?.remoteAddress || 'unknown';
 };
 
-// Increment usage count
-const incrementUsage = (sessionId, model) => {
-  const key = `${getTodayKey()}_${sessionId}_${model}`;
-  usageTracker[key] = (usageTracker[key] || 0) + 1;
-  return usageTracker[key];
+// Generate tracking ID from IP + fingerprint
+const getTrackingId = (req) => {
+  const ip = getClientIP(req);
+  const fingerprint = req.headers['x-client-fingerprint'] || '';
+  const userAgent = req.headers['user-agent'] || '';
+  
+  // Create a hash-like ID from IP + fingerprint + partial UA
+  const crypto = require('crypto');
+  const combined = `${ip}_${fingerprint}_${userAgent.substring(0, 50)}`;
+  return crypto.createHash('md5').update(combined).digest('hex').substring(0, 16);
+};
+
+// Get usage count (from Firestore or cache)
+const getUsageCount = async (trackingId, model) => {
+  const today = getTodayKey();
+  const cacheKey = `${today}_${trackingId}_${model}`;
+  
+  // Check cache first
+  if (usageCache[cacheKey] !== undefined) {
+    return usageCache[cacheKey];
+  }
+  
+  // Try Firestore
+  if (db) {
+    try {
+      const doc = await db.collection('usage_tracking').doc(cacheKey).get();
+      if (doc.exists) {
+        usageCache[cacheKey] = doc.data().count || 0;
+        return usageCache[cacheKey];
+      }
+    } catch (e) {
+      logger.error('Failed to read usage from Firestore', { error: e.message });
+    }
+  }
+  
+  return 0;
+};
+
+// Increment usage count (save to Firestore)
+const incrementUsage = async (trackingId, model, ip) => {
+  const today = getTodayKey();
+  const cacheKey = `${today}_${trackingId}_${model}`;
+  
+  // Update cache
+  usageCache[cacheKey] = (usageCache[cacheKey] || 0) + 1;
+  const newCount = usageCache[cacheKey];
+  
+  // Save to Firestore
+  if (db) {
+    try {
+      await db.collection('usage_tracking').doc(cacheKey).set({
+        trackingId,
+        model,
+        date: today,
+        count: newCount,
+        ip: ip, // Store IP for abuse detection
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      logger.error('Failed to save usage to Firestore', { error: e.message });
+    }
+  }
+  
+  return newCount;
 };
 
 // Check if usage limit reached
-const isLimitReached = (sessionId, model) => {
-  const count = getUsageCount(sessionId, model);
+const isLimitReached = async (trackingId, model) => {
+  const count = await getUsageCount(trackingId, model);
   const limit = MODEL_LIMITS[model] || 5;
   return count >= limit;
 };
 
-// Usage API endpoint
-app.get('/api/usage', (req, res) => {
-  const { session, model } = req.query;
-  const count = getUsageCount(session || 'default', model || 'nano-banana');
-  const limit = MODEL_LIMITS[model] || 5;
-  res.json({ count, limit, remaining: Math.max(0, limit - count) });
+// Usage API endpoint (now uses IP-based tracking)
+app.get('/api/usage', async (req, res) => {
+  const { model } = req.query;
+  const trackingId = getTrackingId(req);
+  const modelKey = model || 'nano-banana';
+  
+  const count = await getUsageCount(trackingId, modelKey);
+  const limit = MODEL_LIMITS[modelKey] || 5;
+  
+  res.json({ 
+    count, 
+    limit, 
+    remaining: Math.max(0, limit - count),
+    trackingId: trackingId.substring(0, 6) + '...' // Partial ID for debugging
+  });
 });
 
 // ===== GALLERY API =====
@@ -644,8 +718,12 @@ app.post('/api/edit-image', async (req, res) => {
   const span = tracer.startSpan('gemini.edit_image');
   
   try {
-    const { image, prompt, model: selectedModel, sessionId } = req.body;
+    const { image, prompt, model: selectedModel } = req.body;
     const userApiKey = req.headers['x-user-api-key'];
+    
+    // Get tracking ID from IP + fingerprint
+    const trackingId = getTrackingId(req);
+    const clientIP = getClientIP(req);
     
     // Determine which model to use
     const modelMapping = {
@@ -658,12 +736,15 @@ app.post('/api/edit-image', async (req, res) => {
     logger.info('Edit Image Request', { 
       prompt_length: prompt.length,
       model: modelKey,
-      hasCustomKey: !!userApiKey
+      hasCustomKey: !!userApiKey,
+      trackingId: trackingId.substring(0, 8),
+      ip: clientIP
     });
     
     // Check usage limits (only if NOT using custom API key)
     if (!userApiKey) {
-      if (isLimitReached(sessionId || 'default', modelKey)) {
+      const limitReached = await isLimitReached(trackingId, modelKey);
+      if (limitReached) {
         span.finish();
         return res.status(429).json({
           reply: `Daily limit reached for ${modelKey === 'nano-banana-pro' ? 'Nano Banana Pro (1/day)' : 'Nano Banana (5/day)'}. Add your own API key for unlimited usage!`,
@@ -839,7 +920,7 @@ app.post('/api/edit-image', async (req, res) => {
     
     // Increment usage counter (only if not using custom API key)
     if (!userApiKey) {
-      incrementUsage(sessionId || 'default', modelKey);
+      await incrementUsage(trackingId, modelKey, clientIP);
     }
     
     span.finish();

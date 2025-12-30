@@ -5,6 +5,52 @@ import { cn } from '../lib/utils'
 import axios from 'axios'
 import { datadogRum } from '@datadog/browser-rum'
 
+// Generate browser fingerprint for quota tracking
+const generateFingerprint = () => {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.textBaseline = 'top';
+  ctx.font = '14px Arial';
+  ctx.fillText('fingerprint', 2, 2);
+  const canvasData = canvas.toDataURL();
+  
+  const components = [
+    navigator.userAgent,
+    navigator.language,
+    screen.width + 'x' + screen.height,
+    screen.colorDepth,
+    new Date().getTimezoneOffset(),
+    navigator.hardwareConcurrency || 'unknown',
+    canvasData.substring(0, 50)
+  ];
+  
+  // Simple hash
+  let hash = 0;
+  const str = components.join('|');
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+};
+
+// Get or create fingerprint
+const getFingerprint = () => {
+  let fp = localStorage.getItem('_fp');
+  if (!fp) {
+    fp = generateFingerprint();
+    localStorage.setItem('_fp', fp);
+  }
+  return fp;
+};
+
+// Configure axios to always send fingerprint
+axios.interceptors.request.use((config) => {
+  config.headers['X-Client-Fingerprint'] = getFingerprint();
+  return config;
+});
+
 // Model configurations
 const IMAGE_MODELS = {
   'nano-banana': {
@@ -45,11 +91,10 @@ const Navbar = () => {
     }
   }
 
-  // Fetch usage count
+  // Fetch usage count (server tracks by IP + fingerprint)
   const fetchUsage = async () => {
     try {
-      const sessionId = sessionStorage.getItem('session_id')
-      const res = await axios.get(`/api/usage?session=${sessionId}&model=${selectedModel}`)
+      const res = await axios.get(`/api/usage?model=${selectedModel}`)
       setUsageCount(res.data.count || 0)
     } catch (err) {
       // Ignore usage fetch errors

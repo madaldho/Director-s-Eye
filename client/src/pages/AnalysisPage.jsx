@@ -93,29 +93,28 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const currentModelConfig = MODEL_CONFIG[selectedModel] || MODEL_CONFIG['nano-banana']
   const MAX_EDITS = currentModelConfig.limit
   
-  // Persistent daily quota - per model
-  const [editCount, setEditCount] = useState(() => {
-    const saved = localStorage.getItem(`magic_edit_quota_${selectedModel}`)
-    if (saved) {
-      const { date, count } = JSON.parse(saved)
-      const today = new Date().toISOString().split('T')[0]
-      if (date === today) return count
-    }
-    return 0
-  })
+  // Server-side quota tracking (IP + fingerprint based)
+  const [editCount, setEditCount] = useState(0)
   
-  // Reset editCount when model changes
-  useEffect(() => {
-    const saved = localStorage.getItem(`magic_edit_quota_${selectedModel}`)
-    if (saved) {
-      const { date, count } = JSON.parse(saved)
-      const today = new Date().toISOString().split('T')[0]
-      if (date === today) {
-        setEditCount(count)
-        return
-      }
+  // Fetch quota from server
+  const fetchQuota = async () => {
+    try {
+      const res = await axios.get(`/api/usage?model=${selectedModel}`)
+      setEditCount(res.data.count || 0)
+    } catch (err) {
+      console.error('Failed to fetch quota:', err)
     }
-    setEditCount(0)
+  }
+  
+  // Fetch quota on mount and when model changes
+  useEffect(() => {
+    fetchQuota()
+  }, [selectedModel])
+  
+  // Refresh quota periodically
+  useEffect(() => {
+    const interval = setInterval(fetchQuota, 5000)
+    return () => clearInterval(interval)
   }, [selectedModel])
 
   const [magicHistory, setMagicHistory] = useState([])
@@ -165,14 +164,8 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
       if (response.data.editedImage) {
         setEditedImage(response.data.editedImage)
         
-        // Update persistent quota for current model
-        const newCount = editCount + 1
-        setEditCount(newCount)
-        const currentModel = localStorage.getItem('image_model') || 'nano-banana'
-        localStorage.setItem(`magic_edit_quota_${currentModel}`, JSON.stringify({
-          date: new Date().toISOString().split('T')[0],
-          count: newCount
-        }))
+        // Refresh quota from server (server tracks by IP)
+        await fetchQuota()
         
         // Dispatch custom event to notify Navbar to refresh usage
         window.dispatchEvent(new Event('usage_updated'))
