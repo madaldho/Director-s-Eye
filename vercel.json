@@ -1,7 +1,8 @@
 {
   "version": 2,
-  "buildCommand": "npm install --prefix client && npm install --prefix server && cd client && npx vite build",
+  "buildCommand": "cd client && npm install && npm run build",
   "outputDirectory": "client/dist",
+  "installCommand": "npm install --prefix server",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
   ]
