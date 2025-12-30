@@ -1,15 +1,17 @@
 {
+  "version": 2,
   "buildCommand": "cd client && npm install && npm run build",
   "outputDirectory": "client/dist",
   "installCommand": "npm install && cd server && npm install && cd ../client && npm install",
   "functions": {
-    "server/index.js": {
+    "api/index.js": {
       "runtime": "@vercel/node@3",
+      "maxDuration": 60,
       "includeFiles": "server/**"
     }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/server/index.js" },
-    { "source": "/:path*", "destination": "/index.html" }
+    { "source": "/api/:path*", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
