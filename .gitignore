@@ -32,6 +32,7 @@ pids
 coverage/
 *.lcov
 
+.kiro
 # nyc test coverage
 .nyc_output
 
