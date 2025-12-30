@@ -11,6 +11,9 @@ node_modules/
 
 # Google Cloud credentials
 credentials.json
+server/service-account.json
+service-account.json
+**/service-account*.json
 
 # Logs
 logs
