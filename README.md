@@ -126,25 +126,47 @@ You will need API keys from the following services:
     
     **Update `.env` with your credentials:**
     
-    | Variable | Description | Example Value |
+    | Variable | Description | Required |
     | :--- | :--- | :--- |
-    | `GOOGLE_API_KEY` | Your Google Gemini API Key | `AIzaSy...` |
-    | `DD_API_KEY` | Datadog API Key | `560b61...` |
-    | `DD_APP_KEY` | Datadog App Key | `e1a67d...` |
-    | `DD_SITE` | Datadog Site Region | `us5.datadoghq.com` |
-    | `DD_LLMOBS_ENABLED` | Enable LLM Observability | `1` |
-    | `DD_LLMOBS_ML_APP` | LLM Obs App Name | `director-eye` |
-    | `VITE_DD_CLIENT_TOKEN` | Datadog Client Token (Frontend) | `pub2ff...` |
-    | `VITE_DD_APPLICATION_ID` | Datadog RUM App ID | `fda0f4...` |
-    | `VITE_DD_SITE` | Datadog Site for RUM | `us5.datadoghq.com` |
+    | `GOOGLE_API_KEY` | Google Gemini API Key | ✅ |
+    | `DD_API_KEY` | Datadog API Key | ✅ |
+    | `DD_APP_KEY` | Datadog App Key | ✅ |
+    | `DD_SITE` | Datadog Site Region (e.g., `us5.datadoghq.com`) | ✅ |
+    | `DD_LLMOBS_ENABLED` | Enable LLM Observability (`1`) | ✅ |
+    | `DD_LLMOBS_ML_APP` | LLM Obs App Name (`director-eye`) | ✅ |
+    | `VITE_DD_CLIENT_TOKEN` | Datadog Client Token (Frontend) | ✅ |
+    | `VITE_DD_APPLICATION_ID` | Datadog RUM App ID | ✅ |
+    | `VITE_DD_SITE` | Datadog Site for RUM | ✅ |
+    | `VITE_FIREBASE_API_KEY` | Firebase Client API Key | ✅ |
+    | `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Auth Domain | ✅ |
+    | `VITE_FIREBASE_PROJECT_ID` | Firebase Project ID | ✅ |
+    | `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Storage Bucket | ✅ |
+    | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase Messaging Sender ID | ✅ |
+    | `VITE_FIREBASE_APP_ID` | Firebase App ID | ✅ |
+    | `VITE_FIREBASE_MEASUREMENT_ID` | Firebase Analytics Measurement ID | Optional |
+    | `VITE_FIREBASE_DATABASE_URL` | Firebase Realtime Database URL | Optional |
 
 4.  **Firebase Setup (For Gallery Feature):**
+    
+    **Server-side (Admin SDK):**
+    
+    Option A - Service Account File (Local Development):
     ```bash
     # 1. Create Firebase project at console.firebase.google.com
     # 2. Enable Firestore Database
     # 3. Download Service Account JSON from Project Settings > Service Accounts
-    # 4. Save as server/service-account.json
-    # 5. Deploy Firestore indexes:
+    # 4. Save as server/service-account.json (gitignored)
+    ```
+    
+    Option B - Environment Variables (Production/Vercel):
+    ```bash
+    FIREBASE_PROJECT_ID=your-project-id
+    FIREBASE_CLIENT_EMAIL=firebase-adminsdk@your-project.iam.gserviceaccount.com
+    FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+    ```
+    
+    **Deploy Firestore indexes:**
+    ```bash
     npx firebase-tools deploy --only firestore:indexes
     ```
 
