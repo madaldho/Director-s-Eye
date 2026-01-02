@@ -80,7 +80,6 @@ All Datadog configurations exported as JSON:
 - `slo_created.json` - SLO definition
 - `slo_latency.json` - Latency SLO
 
-**For complete Datadog organization details, see [DATADOG_ORGANIZATION.md](./DATADOG_ORGANIZATION.md)**
 
 ---
 
