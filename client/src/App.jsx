@@ -9,6 +9,13 @@ import HomePage from './pages/HomePage'
 import AnalysisPage from './pages/AnalysisPage'
 
 function App() {
+  // Disable browser's default scroll restoration
+  useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+  }, []);
+
   // Initialize sessionId on app start (before any component needs it)
   useEffect(() => {
     if (!sessionStorage.getItem('session_id')) {

@@ -31,6 +31,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   const [chatMessages, setChatMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [isChatting, setIsChatting] = useState(false)
+  const [sessionId, setSessionId] = useState(null)
 
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [copiedSummary, setCopiedSummary] = useState(false)
@@ -47,6 +48,38 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
     setToast({ show: true, type, message })
     setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000)
   }
+
+  // Generate or get session ID for persistent chat
+  useEffect(() => {
+    let currentSessionId = sessionStorage.getItem('chat_session_id')
+    if (!currentSessionId) {
+      currentSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      sessionStorage.setItem('chat_session_id', currentSessionId)
+    }
+    setSessionId(currentSessionId)
+  }, [])
+
+  // Load chat history when session ID is available
+  useEffect(() => {
+    if (!sessionId) return
+
+    const loadChatHistory = async () => {
+      try {
+        const response = await axios.get(`/api/chat/history/${sessionId}`)
+        if (response.data.messages && response.data.messages.length > 0) {
+          setChatMessages(response.data.messages.map(msg => ({
+            id: msg.timestamp || Date.now(),
+            type: msg.type,
+            content: msg.content
+          })))
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error)
+      }
+    }
+
+    loadChatHistory()
+  }, [sessionId])
   
   // Edit State
   const [isEditing, setIsEditing] = useState(false)
@@ -315,7 +348,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
   }, [chatMessages])
 
   const sendChatMessage = async () => {
-    if (!chatInput.trim() || isChatting) return
+    if (!chatInput.trim() || isChatting || !sessionId) return
 
     const userMessage = chatInput.trim()
     setChatInput('')
@@ -323,17 +356,11 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
 
     setChatMessages(prev => [...prev, { id: Date.now(), type: 'user', content: userMessage }])
     
-    // Format history for Gemini
-    const history = chatMessages.map(msg => ({
-      role: msg.type === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }));
-
     try {
       const imageBase64 = image.split(',')[1]
       const response = await axios.post('/api/chat', {
         message: userMessage,
-        history: history, // Send History
+        sessionId: sessionId, // Send session ID for persistent memory
         imageContext: imageBase64,
         analysisContext: result
       })
@@ -491,11 +518,28 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                 <button className="flex-1 py-4 text-sm font-semibold text-white border-b-2 border-indigo-500 bg-white/5">
                    AI Director
                 </button>
-                <div className="flex-1 py-4 text-center">
-                  <span className="text-xs text-zinc-500 font-mono flex items-center justify-center gap-1">
+                <div className="flex-1 py-4 text-center flex items-center justify-center gap-2">
+                  <span className="text-xs text-zinc-500 font-mono flex items-center gap-1">
                     <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                     ONLINE
                   </span>
+                  {chatMessages.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setChatMessages([])
+                        if (sessionId) {
+                          sessionStorage.removeItem('chat_session_id')
+                          const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                          sessionStorage.setItem('chat_session_id', newSessionId)
+                          setSessionId(newSessionId)
+                        }
+                      }}
+                      className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors ml-2"
+                      title="Clear chat history"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
              </div>
 
@@ -561,7 +605,7 @@ const AnalysisPage = ({ result, image, onTelemetryLog }) => {
                      value={chatInput}
                      onChange={e => setChatInput(e.target.value)}
                      onKeyDown={e => e.key === 'Enter' && sendChatMessage()}
-                     placeholder="Ask about your score..." 
+                     placeholder={chatMessages.length > 0 ? "Continue the conversation..." : "Ask about your score..."} 
                      className="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-12 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600"
                    />
                    <button 

@@ -43,6 +43,8 @@ Built with a focus on **Visual Experience** and **System Reliability**, Director
 
 ## 📊 Observability Strategy
 
+**Datadog Organization**: `madaldho Backpack`
+
 | Signal Type | Implementation |
 |:---|:---|
 | **APM Tracing** | `dd-trace` auto-instrumentation + custom spans for AI calls |
@@ -77,6 +79,8 @@ All Datadog configurations exported as JSON:
 - `monitor_quality_score.json` - Quality score monitor
 - `slo_created.json` - SLO definition
 - `slo_latency.json` - Latency SLO
+
+**For complete Datadog organization details, see [DATADOG_ORGANIZATION.md](./DATADOG_ORGANIZATION.md)**
 
 ---
 

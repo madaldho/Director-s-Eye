@@ -74,7 +74,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-// 🤖 AI INITIALIZATION (Gemini 2.5 Flash Lite & Gemini 3.0 Pro)
+// 🤖 AI INITIALIZATION (Gemini 2.5 Flash)
 let genAI = null;
 let model = null;
 
@@ -82,7 +82,7 @@ try {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (apiKey) {
         genAI = new GoogleGenAI({ apiKey });
-        logger.info('Google GenAI initialized');
+        logger.info('Google GenAI initialized with Gemini 2.5 Flash');
     } else {
         logger.warn('AI Key Missing - Running in Demo mode');
     }
@@ -113,7 +113,7 @@ app.post('/api/validate-key', async (req, res) => {
     // Test the API key by making a simple text request (not image)
     const testAI = new GoogleGenAI({ apiKey: userApiKey });
     const response = await testAI.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: [{ text: 'Reply with just "OK"' }] }]
     });
     
@@ -387,7 +387,7 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
   const startTime = Date.now();
   
   try {
-    span.setTag('ai.model', 'gemini-2.0-flash');
+    span.setTag('ai.model', 'gemini-2.5-flash');
     span.setTag('app.version', 'v1.0');
     
     logger.info('Starting image analysis', { 
@@ -454,7 +454,7 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
     - "prompt" should describe the SUBJECT, ACTION, SCENE + technical camera details.`;
 
     const response = await genAI.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: [
         {
           role: 'user',
@@ -481,9 +481,9 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
       // 1. Token Usage & Cost (Business Metrics)
       const usage = response.usageMetadata || { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 };
       
-      sendMetric('app.ai.tokens.prompt', usage.promptTokenCount, ['model:gemini-2.0-flash']);
-      sendMetric('app.ai.tokens.completion', usage.candidatesTokenCount, ['model:gemini-2.0-flash']);
-      sendMetric('app.ai.tokens.total', usage.totalTokenCount, ['model:gemini-2.0-flash']);
+      sendMetric('app.ai.tokens.prompt', usage.promptTokenCount, ['model:gemini-2.5-flash']);
+      sendMetric('app.ai.tokens.completion', usage.candidatesTokenCount, ['model:gemini-2.5-flash']);
+      sendMetric('app.ai.tokens.total', usage.totalTokenCount, ['model:gemini-2.5-flash']);
 
       // Estimated Cost
       const estCost = (usage.promptTokenCount * 0.00000035) + (usage.candidatesTokenCount * 0.00000105);
@@ -560,12 +560,61 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
   }
 });
 
+// Get chat history for a session
+app.get('/api/chat/history/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    const historyRef = db.collection('chat_history').doc(sessionId);
+    const historyDoc = await historyRef.get();
+    
+    if (!historyDoc.exists) {
+      return res.json({ messages: [] });
+    }
+    
+    const data = historyDoc.data();
+    res.json({ messages: data.messages || [] });
+    
+  } catch (error) {
+    logger.error('Failed to get chat history', { error: error.message, sessionId: req.params.sessionId });
+    res.status(500).json({ error: 'Failed to get chat history' });
+  }
+});
+
+// Save chat message to history
+async function saveChatMessage(sessionId, message) {
+  try {
+    const historyRef = db.collection('chat_history').doc(sessionId);
+    const historyDoc = await historyRef.get();
+    
+    let messages = [];
+    if (historyDoc.exists) {
+      messages = historyDoc.data().messages || [];
+    }
+    
+    messages.push({
+      ...message,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    // Keep only last 50 messages to prevent unlimited growth
+    if (messages.length > 50) {
+      messages = messages.slice(-50);
+    }
+    
+    await historyRef.set({ messages }, { merge: true });
+    
+  } catch (error) {
+    logger.error('Failed to save chat message', { error: error.message, sessionId });
+  }
+}
+
 // Chat Endpoint
 app.post('/api/chat', async (req, res) => {
   const span = tracer.startSpan('gemini.chat');
   
   try {
-    const { message, history, imageContext, analysisContext } = req.body;
+    const { message, history, imageContext, analysisContext, sessionId } = req.body;
     span.setTag('chat.message_length', message.length);
     span.setTag('chat.history_length', history ? history.length : 0);
     
@@ -602,8 +651,28 @@ app.post('/api/chat', async (req, res) => {
     logger.info('Chat request', { 
       messageLength: message.length, 
       historyLength: history ? history.length : 0,
-      security_check: isSuspicious ? 'flagged' : 'passed'
+      security_check: isSuspicious ? 'flagged' : 'passed',
+      sessionId: sessionId || 'none'
     });
+
+    // Load persistent chat history if sessionId provided
+    let persistentHistory = [];
+    if (sessionId) {
+      try {
+        const historyRef = db.collection('chat_history').doc(sessionId);
+        const historyDoc = await historyRef.get();
+        if (historyDoc.exists) {
+          persistentHistory = historyDoc.data().messages || [];
+          // Convert to Gemini format
+          persistentHistory = persistentHistory.map(msg => ({
+            role: msg.type === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }]
+          }));
+        }
+      } catch (error) {
+        logger.warn('Failed to load chat history', { error: error.message, sessionId });
+      }
+    }
 
     if (!genAI) {
       // Demo response
@@ -615,27 +684,38 @@ app.post('/api/chat', async (req, res) => {
       return res.json({ reply: demoReplies[Math.floor(Math.random() * demoReplies.length)] });
     }
 
-    // Dynamic System Prompt - Concise & Conversational Director
-    const systemInstruction = `You are "The Director" - a passionate cinematography mentor with decades of experience.
+    // Enhanced System Instruction - Better Multilingual Support
+    const systemInstruction = `You are "The Director" - a world-renowned cinematography mentor with decades of experience directing award-winning films.
 
-CORE IDENTITY:
-- Speak naturally like a wise film director chatting with a student
-- Be concise but insightful - quality over quantity
-- Remember context from the conversation
-- Give specific, actionable advice based on the image being discussed
+CRITICAL LANGUAGE RULE:
+- ALWAYS detect and respond in the EXACT same language the user writes in
+- If user writes in Arabic (العربية) → respond ONLY in Arabic
+- If user writes in Indonesian → respond ONLY in Indonesian  
+- If user writes in English → respond ONLY in English
+- If user writes in any other language → match that language EXACTLY
+- NEVER mix languages in your response
+- Be completely fluent and natural in whatever language you use
 
-RESPONSE STYLE:
-- Keep responses focused and to-the-point (2-4 paragraphs max unless asked for detail)
-- Use the same language as the user , muli languange, like much langunge jenius
-- Be warm but authoritative - like a mentor, not a textbook
-- Reference specific elements you see in their image
-- Avoid generic advice - be specific to THEIR shot
+PERSONALITY & COMMUNICATION:
+- Speak naturally like a wise mentor talking to a talented student
+- Be encouraging yet honest about strengths and areas for improvement
+- Share insights from your "experience" on film sets
+- Keep responses concise but insightful (2-4 sentences typically)
+- Remember previous parts of the conversation and build upon them
 
-WHAT MAKES YOU SPECIAL:
-- You notice subtle details others miss
-- You connect technical aspects to emotional impact
-- You inspire while being honest about improvements needed
-- You remember what was discussed earlier in the conversation`;
+EXPERTISE FOCUS:
+- Lighting design, composition, color, mood, and visual storytelling
+- Connect technical aspects to emotional impact
+- Give specific, actionable advice rather than generic tips
+- Reference what you can see in images when relevant
+
+CONVERSATION MEMORY:
+- Remember what the user has discussed before
+- Build upon previous conversations naturally
+- Reference earlier points when relevant
+- Maintain conversation context throughout the session
+
+Remember: You are mentoring someone to become a better visual storyteller. Always respond in their exact language and be conversational, helpful, and remember previous discussions.`;
 
     // Inject context as a natural observation
     let contextObservation = "";
@@ -656,14 +736,21 @@ WHAT MAKES YOU SPECIAL:
       });
     }
 
-    // Call generateContent with Gemini 2.0 Flash - Better quality responses
+    // Call generateContent with proper conversation structure and better config
     const response = await genAI.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       systemInstruction: { parts: [{ text: systemInstruction }] },
       contents: [
-        ...(history || []),
+        ...persistentHistory, // Use persistent history instead of session history
         { role: 'user', parts: userMessageParts }
-      ]
+      ],
+      generationConfig: {
+        temperature: 0.9, // Higher creativity for better language adaptation
+        topP: 0.95,
+        topK: 50,
+        maxOutputTokens: 1000,
+        candidateCount: 1
+      }
     });
 
     let reply = "";
@@ -689,7 +776,13 @@ WHAT MAKES YOU SPECIAL:
 
     if (!reply) reply = "This shot has compelling qualities. What specific feedback would you like?";
 
-    logger.info('Chat response sent', { responseLength: reply.length });
+    // Save both user message and AI response to persistent history
+    if (sessionId) {
+      await saveChatMessage(sessionId, { type: 'user', content: message });
+      await saveChatMessage(sessionId, { type: 'assistant', content: reply });
+    }
+
+    logger.info('Chat response sent', { responseLength: reply.length, sessionId: sessionId || 'none' });
     span.finish();
     res.json({ reply });
 
