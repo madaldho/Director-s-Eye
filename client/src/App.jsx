@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { datadogRum } from '@datadog/browser-rum'
 import Navbar from './components/Navbar'
 import TelemetryConsole from './components/TelemetryConsole'
+import BackToTop from './components/BackToTop'
+import ScrollToTop from './components/ScrollToTop'
 import HomePage from './pages/HomePage'
 import AnalysisPage from './pages/AnalysisPage'
 
@@ -64,6 +66,7 @@ function App() {
   return (
     <Router>
       <div className="min-h-screen bg-dark-950 text-white">
+        <ScrollToTop />
         <Navbar onTelemetryLog={addTelemetryLog} />
         
         <main className="pb-32"> {/* Space for telemetry console */}
@@ -90,6 +93,7 @@ function App() {
           </Routes>
         </main>
         
+        <BackToTop />
         <TelemetryConsole logs={telemetryLogs} />
       </div>
     </Router>
